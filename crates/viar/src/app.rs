@@ -161,7 +161,7 @@ impl ViarApp {
         let info = &dev.info;
         let proto = ViaProtocol::new(dev);
 
-        // Try Vial definition first, then hardcoded, then generic
+        // Try Vial definition first, then VIA JSON from config dir, then generic
         let mut layout_warning: Option<String> = None;
         let layout = match proto.vial_get_definition() {
             Ok(json) => {
@@ -184,11 +184,27 @@ impl ViarApp {
                 }
             }
             Err(e) => {
-                debug!(error = %e, "no Vial definition available, using generic layout");
-                layout_warning = Some(format!(
-                    "Could not fetch layout from firmware: {e}. Using generic grid."
-                ));
-                generic_layout(4, 12)
+                debug!(error = %e, "no Vial definition available, trying VIA JSON definition");
+                // Try to load a VIA JSON definition from the config directory
+                match load_via_definition(info.vendor_id, info.product_id) {
+                    Some(mut layout) => {
+                        info!("loaded VIA JSON definition from config directory");
+                        if layout.name == "Vial Keyboard" {
+                            layout.name = format!("{}", info);
+                        }
+                        layout
+                    }
+                    None => {
+                        layout_warning = Some(format!(
+                            "No Vial firmware and no VIA JSON definition found. Using generic grid.\n\
+                             To fix: place a VIA JSON definition at {}",
+                            via_definition_path(info.vendor_id, info.product_id)
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| "~/.config/viar/definitions/<vid>_<pid>.json".into())
+                        ));
+                        generic_layout(4, 12)
+                    }
+                }
             }
         };
 
@@ -446,5 +462,42 @@ impl eframe::App for ViarApp {
             }
             AppScreen::Connected => self.render_connected(ui),
         });
+    }
+}
+
+/// Get the path where a VIA JSON definition would be stored for a given VID:PID.
+fn via_definition_path(vendor_id: u16, product_id: u16) -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| {
+        d.join("viar")
+            .join("definitions")
+            .join(format!("{:04x}_{:04x}.json", vendor_id, product_id))
+    })
+}
+
+/// Try to load a VIA JSON definition from the config directory.
+/// Looks for `~/.config/viar/definitions/<vid>_<pid>.json`.
+fn load_via_definition(
+    vendor_id: u16,
+    product_id: u16,
+) -> Option<via_protocol::layout::KeyboardLayout> {
+    let path = via_definition_path(vendor_id, product_id)?;
+    if !path.exists() {
+        debug!(path = %path.display(), "no VIA definition file found");
+        return None;
+    }
+    info!(path = %path.display(), "loading VIA JSON definition");
+    let json = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, path = %path.display(), "failed to read VIA definition file");
+            return None;
+        }
+    };
+    match parse_vial_definition(&json) {
+        Ok(layout) => Some(layout),
+        Err(e) => {
+            warn!(error = %e, path = %path.display(), "failed to parse VIA definition file");
+            None
+        }
     }
 }

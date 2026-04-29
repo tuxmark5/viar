@@ -38,6 +38,7 @@ pub fn hsv_to_rgb(h: u8, s: u8, v: u8) -> (u8, u8, u8) {
     let c = v * s;
     let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
     let m = v - c;
+
     let (r1, g1, b1) = if h < 60.0 {
         (c, x, 0.0)
     } else if h < 120.0 {
