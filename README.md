@@ -20,6 +20,10 @@ Viar is a lightweight, Rust-native alternative to [VIA](https://usevia.app/) and
 ## Showcase
 <img width="2548" height="1367" alt="image" src="https://github.com/user-attachments/assets/141ed36e-6954-4096-834f-ecde8d18f47e" />
 
+Preview of a keyboard layout with homerow mods as Tap Dances and with combos. Combos are shown with color matching dots on the keys that trigger their combo.
+<img width="1264" height="1372" alt="image" src="https://github.com/user-attachments/assets/295b7a0e-de41-4b18-a1aa-ee112417ac46" />
+
+
 ## Project Structure
 
 ```
