@@ -74,4 +74,6 @@ pub struct ViarApp {
     pub connect_uptime_ms: Option<u32>,
     /// Detected QMK features based on protocol probing
     pub detected_features: Vec<String>,
+    /// User-generated quantum keycodes (mod-tap, OSM, etc.) for quick picker access
+    pub quantum_favorites: Vec<u16>,
 }

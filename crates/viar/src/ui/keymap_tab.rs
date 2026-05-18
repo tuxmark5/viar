@@ -512,14 +512,28 @@ impl ViarApp {
 
                     ui.add_space(2.0);
 
-                    // Group tabs + Builders tab
-                    let builder_tab_idx = self.picker_groups.len();
+                    // Group tabs + My Quantum tab + Builders tab
+                    let has_quantum_favs = !self.quantum_favorites.is_empty();
+                    let quantum_tab_idx = self.picker_groups.len();
+                    let builder_tab_idx = if has_quantum_favs {
+                        self.picker_groups.len() + 1
+                    } else {
+                        self.picker_groups.len()
+                    };
                     ui.horizontal_wrapped(|ui| {
                         for (i, group) in self.picker_groups.iter().enumerate() {
                             let sel = self.picker_selected_group == i;
                             let label = egui::RichText::new(group.name).size(15.5);
                             if themed_tab(ui, sel, label, &self.theme).clicked() {
                                 self.picker_selected_group = i;
+                            }
+                        }
+                        // My Quantum tab (only if favorites exist)
+                        if has_quantum_favs {
+                            let sel = self.picker_selected_group == quantum_tab_idx;
+                            let label = egui::RichText::new("My Quantum").size(15.5);
+                            if themed_tab(ui, sel, label, &self.theme).clicked() {
+                                self.picker_selected_group = quantum_tab_idx;
                             }
                         }
                         // Builders tab (for LT, MT, Mod+Key, OSM)
@@ -544,6 +558,87 @@ impl ViarApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 picked_kc = render_keycode_builder(ui, raw_kc);
+                            });
+                    } else if has_quantum_favs && group_idx == quantum_tab_idx {
+                        // My Quantum favorites grid
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                                    for &fav_raw in &self.quantum_favorites {
+                                        let kc = Keycode(fav_raw);
+                                        let name = kc.name();
+                                        let is_current = fav_raw == raw_kc;
+                                        let size = egui::vec2(56.0, 36.0);
+                                        let (rect, response) =
+                                            ui.allocate_exact_size(size, egui::Sense::click());
+                                        let is_hovered = response.hovered();
+
+                                        let bg = if is_current {
+                                            egui::Color32::from_rgb(70, 130, 180)
+                                        } else if is_hovered {
+                                            egui::Color32::from_rgb(80, 80, 90)
+                                        } else {
+                                            egui::Color32::from_rgb(50, 55, 65)
+                                        };
+                                        let border = if is_current {
+                                            egui::Color32::from_rgb(100, 180, 255)
+                                        } else {
+                                            egui::Color32::from_rgb(70, 100, 140)
+                                        };
+
+                                        let rounding = egui::CornerRadius::same(4);
+                                        ui.painter().rect_filled(rect, rounding, bg);
+                                        ui.painter().rect_stroke(
+                                            rect,
+                                            rounding,
+                                            egui::Stroke::new(1.0_f32, border),
+                                            egui::StrokeKind::Outside,
+                                        );
+
+                                        // Dual-label rendering
+                                        if let Some((tap, hold)) = kc.dual_labels() {
+                                            let top = egui::pos2(
+                                                rect.center().x,
+                                                rect.min.y + rect.height() * 0.32,
+                                            );
+                                            ui.painter().text(
+                                                top,
+                                                egui::Align2::CENTER_CENTER,
+                                                &tap,
+                                                egui::FontId::proportional(12.0),
+                                                egui::Color32::WHITE,
+                                            );
+                                            let bot = egui::pos2(
+                                                rect.center().x,
+                                                rect.min.y + rect.height() * 0.72,
+                                            );
+                                            ui.painter().text(
+                                                bot,
+                                                egui::Align2::CENTER_CENTER,
+                                                &hold,
+                                                egui::FontId::proportional(9.0),
+                                                egui::Color32::from_rgb(150, 180, 220),
+                                            );
+                                        } else {
+                                            let font_size =
+                                                if name.len() <= 5 { 11.0 } else { 9.0 };
+                                            ui.painter().text(
+                                                rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                &name,
+                                                egui::FontId::proportional(font_size),
+                                                egui::Color32::from_rgb(220, 220, 230),
+                                            );
+                                        }
+
+                                        if response.clicked() {
+                                            picked_kc = Some(fav_raw);
+                                        }
+                                        response.on_hover_text(kc.description());
+                                    }
+                                });
                             });
                     } else {
                         egui::ScrollArea::vertical()

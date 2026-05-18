@@ -56,6 +56,7 @@ impl ViarApp {
             firmware_version: None,
             connect_uptime_ms: None,
             detected_features: Vec::new(),
+            quantum_favorites: Vec::new(),
         }
     }
 
