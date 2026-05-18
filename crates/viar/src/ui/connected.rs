@@ -67,6 +67,16 @@ impl ViarApp {
                     self.active_tab = ConnectedTab::KeyOverrides;
                 }
             }
+            if themed_tab(
+                ui,
+                self.active_tab == ConnectedTab::Quantum,
+                "Quantum",
+                &theme,
+            )
+            .clicked()
+            {
+                self.active_tab = ConnectedTab::Quantum;
+            }
             if self.pointing_data.is_some()
                 && themed_tab(
                     ui,
@@ -125,6 +135,7 @@ impl ViarApp {
             ConnectedTab::TapDance => self.render_tap_dance_tab(ui),
             ConnectedTab::Combos => self.render_combos_tab(ui),
             ConnectedTab::KeyOverrides => self.render_key_overrides_tab(ui),
+            ConnectedTab::Quantum => self.render_quantum_tab(ui),
             ConnectedTab::Pointing => self.render_pointing_tab(ui),
             ConnectedTab::QmkSettings => self.render_qmk_settings_tab(ui),
             ConnectedTab::Settings => self.render_settings_tab(ui),

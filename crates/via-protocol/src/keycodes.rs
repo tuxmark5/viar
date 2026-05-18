@@ -46,6 +46,98 @@ impl Keycode {
         Self(0x5600 | kc as u16)
     }
 
+    // ── Convenience Mod-Tap constructors (QMK-style aliases) ──
+
+    /// LCTL_T(kc) — tap produces `kc`, hold activates Left Control.
+    pub fn lctl_t(kc: u8) -> Self {
+        Self::mod_tap(0x01, kc)
+    }
+
+    /// LSFT_T(kc) — tap produces `kc`, hold activates Left Shift.
+    pub fn lsft_t(kc: u8) -> Self {
+        Self::mod_tap(0x02, kc)
+    }
+
+    /// LALT_T(kc) — tap produces `kc`, hold activates Left Alt.
+    pub fn lalt_t(kc: u8) -> Self {
+        Self::mod_tap(0x04, kc)
+    }
+
+    /// LGUI_T(kc) — tap produces `kc`, hold activates Left GUI.
+    pub fn lgui_t(kc: u8) -> Self {
+        Self::mod_tap(0x08, kc)
+    }
+
+    /// RCTL_T(kc) — tap produces `kc`, hold activates Right Control.
+    pub fn rctl_t(kc: u8) -> Self {
+        Self::mod_tap(0x11, kc)
+    }
+
+    /// RSFT_T(kc) — tap produces `kc`, hold activates Right Shift.
+    pub fn rsft_t(kc: u8) -> Self {
+        Self::mod_tap(0x12, kc)
+    }
+
+    /// RALT_T(kc) — tap produces `kc`, hold activates Right Alt.
+    pub fn ralt_t(kc: u8) -> Self {
+        Self::mod_tap(0x14, kc)
+    }
+
+    /// RGUI_T(kc) — tap produces `kc`, hold activates Right GUI.
+    pub fn rgui_t(kc: u8) -> Self {
+        Self::mod_tap(0x18, kc)
+    }
+
+    /// C_S_T(kc) — tap produces `kc`, hold activates Ctrl+Shift.
+    pub fn c_s_t(kc: u8) -> Self {
+        Self::mod_tap(0x03, kc)
+    }
+
+    /// MEH_T(kc) — tap produces `kc`, hold activates Ctrl+Shift+Alt (Meh).
+    pub fn meh_t(kc: u8) -> Self {
+        Self::mod_tap(0x07, kc)
+    }
+
+    /// HYPR_T(kc) — tap produces `kc`, hold activates Ctrl+Shift+Alt+GUI (Hyper).
+    pub fn hypr_t(kc: u8) -> Self {
+        Self::mod_tap(0x0F, kc)
+    }
+
+    /// ALL_T(kc) — alias for HYPR_T.
+    pub fn all_t(kc: u8) -> Self {
+        Self::hypr_t(kc)
+    }
+
+    /// Construct a One-Shot Layer keycode: OSL(layer)
+    pub fn one_shot_layer(layer: u8) -> Self {
+        Self(0x5280 | (layer as u16 & 0x1F))
+    }
+
+    /// Construct a Layer Momentary keycode: MO(layer)
+    pub fn layer_momentary(layer: u8) -> Self {
+        Self(0x5220 | (layer as u16 & 0x1F))
+    }
+
+    /// Construct a Layer Toggle keycode: TG(layer)
+    pub fn layer_toggle(layer: u8) -> Self {
+        Self(0x5260 | (layer as u16 & 0x1F))
+    }
+
+    /// Construct a Layer On keycode: TO(layer)
+    pub fn layer_on(layer: u8) -> Self {
+        Self(0x5200 | (layer as u16 & 0x1F))
+    }
+
+    /// Construct a Tap-Toggle Layer keycode: TT(layer)
+    pub fn layer_tap_toggle(layer: u8) -> Self {
+        Self(0x52C0 | (layer as u16 & 0x1F))
+    }
+
+    /// Construct a Default Layer keycode: DF(layer)
+    pub fn layer_default(layer: u8) -> Self {
+        Self(0x5240 | (layer as u16 & 0x1F))
+    }
+
     /// Extract the modifier mask for ModTap, Mod, or OSM keycodes.
     pub fn mod_mask(self) -> u8 {
         match self.category() {
@@ -163,7 +255,7 @@ impl Keycode {
                 let mods = (raw >> 8) & 0x1F;
                 let kc = raw & 0xFF;
                 let tap = basic_keycode_name(kc).unwrap_or("??").to_string();
-                let hold = mod_mask_to_string(mods as u8);
+                let hold = mod_tap_prefix(mods as u8).to_string();
                 Some((tap, hold))
             }
             KeycodeCategory::LayerTap => {
@@ -256,8 +348,9 @@ impl Keycode {
                 let mods = (raw >> 8) & 0x1F;
                 let kc = raw & 0xFF;
                 let kc_name = basic_keycode_name(kc).unwrap_or("??");
-                let mod_str = mod_mask_to_string(mods as u8);
-                format!("MT({mod_str},{kc_name})")
+                // Use QMK-style alias if it's a single modifier
+                let prefix = mod_tap_prefix(mods as u8);
+                format!("{prefix}({kc_name})")
             }
             KeycodeCategory::Mod => {
                 // Modifier + basic key: bits [12:8] = mod, bits [7:0] = key
@@ -510,6 +603,38 @@ pub fn mod_mask_to_string(mods: u8) -> String {
         "MOD".to_string()
     } else {
         parts.join("+")
+    }
+}
+
+/// Get the QMK-style Mod-Tap prefix for a given modifier mask.
+/// Returns e.g. "LSFT_T", "LCTL_T", "MEH_T", or falls back to "MT(mods,".
+pub fn mod_tap_prefix(mods: u8) -> &'static str {
+    match mods {
+        0x01 => "LCTL_T",
+        0x02 => "LSFT_T",
+        0x04 => "LALT_T",
+        0x08 => "LGUI_T",
+        0x11 => "RCTL_T",
+        0x12 => "RSFT_T",
+        0x14 => "RALT_T",
+        0x18 => "RGUI_T",
+        0x03 => "C_S_T",
+        0x05 => "LCA_T",
+        0x09 => "LCG_T",
+        0x06 => "LSA_T",
+        0x0A => "LSG_T",
+        0x0C => "LAG_T",
+        0x07 => "MEH_T",
+        0x0F => "HYPR_T",
+        0x13 => "RCS_T",
+        0x15 => "RCA_T",
+        0x19 => "RCG_T",
+        0x16 => "RSA_T",
+        0x1A => "RSG_T",
+        0x1C => "RAG_T",
+        0x17 => "RMEH_T",
+        0x1F => "RHYP_T",
+        _ => "MT",
     }
 }
 
@@ -1244,4 +1369,241 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
             ],
         },
     ]
+}
+
+/// Describes a type of quantum key that can be configured.
+#[derive(Debug, Clone)]
+pub struct QuantumKeyType {
+    /// Display name, e.g. "LSFT_T"
+    pub name:        &'static str,
+    /// Human-readable description
+    pub description: &'static str,
+    /// The modifier mask used (for mod-tap types)
+    pub mod_mask:    Option<u8>,
+    /// The category this belongs to
+    pub category:    &'static str,
+}
+
+/// Get all available quantum key types that can be configured.
+/// This is the public API for discovering what quantum keys are available.
+pub fn quantum_key_types() -> Vec<QuantumKeyType> {
+    vec![
+        // Mod-Tap keys
+        QuantumKeyType {
+            name:        "LCTL_T",
+            description: "Tap: key, Hold: Left Control",
+            mod_mask:    Some(0x01),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LSFT_T",
+            description: "Tap: key, Hold: Left Shift",
+            mod_mask:    Some(0x02),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LALT_T",
+            description: "Tap: key, Hold: Left Alt",
+            mod_mask:    Some(0x04),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LGUI_T",
+            description: "Tap: key, Hold: Left GUI/Super",
+            mod_mask:    Some(0x08),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "RCTL_T",
+            description: "Tap: key, Hold: Right Control",
+            mod_mask:    Some(0x11),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "RSFT_T",
+            description: "Tap: key, Hold: Right Shift",
+            mod_mask:    Some(0x12),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "RALT_T",
+            description: "Tap: key, Hold: Right Alt",
+            mod_mask:    Some(0x14),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "RGUI_T",
+            description: "Tap: key, Hold: Right GUI/Super",
+            mod_mask:    Some(0x18),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "C_S_T",
+            description: "Tap: key, Hold: Ctrl+Shift",
+            mod_mask:    Some(0x03),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LCA_T",
+            description: "Tap: key, Hold: Ctrl+Alt",
+            mod_mask:    Some(0x05),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LCG_T",
+            description: "Tap: key, Hold: Ctrl+GUI",
+            mod_mask:    Some(0x09),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LSA_T",
+            description: "Tap: key, Hold: Shift+Alt",
+            mod_mask:    Some(0x06),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LSG_T",
+            description: "Tap: key, Hold: Shift+GUI",
+            mod_mask:    Some(0x0A),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "LAG_T",
+            description: "Tap: key, Hold: Alt+GUI",
+            mod_mask:    Some(0x0C),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "MEH_T",
+            description: "Tap: key, Hold: Ctrl+Shift+Alt (Meh)",
+            mod_mask:    Some(0x07),
+            category:    "Mod-Tap",
+        },
+        QuantumKeyType {
+            name:        "HYPR_T",
+            description: "Tap: key, Hold: Ctrl+Shift+Alt+GUI (Hyper)",
+            mod_mask:    Some(0x0F),
+            category:    "Mod-Tap",
+        },
+        // One-Shot Modifiers
+        QuantumKeyType {
+            name:        "OSM(Ctrl)",
+            description: "One-Shot Left Control — applies to next keypress only",
+            mod_mask:    Some(0x01),
+            category:    "One-Shot Mod",
+        },
+        QuantumKeyType {
+            name:        "OSM(Shift)",
+            description: "One-Shot Left Shift — applies to next keypress only",
+            mod_mask:    Some(0x02),
+            category:    "One-Shot Mod",
+        },
+        QuantumKeyType {
+            name:        "OSM(Alt)",
+            description: "One-Shot Left Alt — applies to next keypress only",
+            mod_mask:    Some(0x04),
+            category:    "One-Shot Mod",
+        },
+        QuantumKeyType {
+            name:        "OSM(GUI)",
+            description: "One-Shot Left GUI — applies to next keypress only",
+            mod_mask:    Some(0x08),
+            category:    "One-Shot Mod",
+        },
+        QuantumKeyType {
+            name:        "OSM(Meh)",
+            description: "One-Shot Ctrl+Shift+Alt — applies to next keypress only",
+            mod_mask:    Some(0x07),
+            category:    "One-Shot Mod",
+        },
+        QuantumKeyType {
+            name:        "OSM(Hyper)",
+            description: "One-Shot Ctrl+Shift+Alt+GUI — applies to next keypress only",
+            mod_mask:    Some(0x0F),
+            category:    "One-Shot Mod",
+        },
+        // Layer functions
+        QuantumKeyType {
+            name:        "LT",
+            description: "Layer-Tap: tap produces key, hold activates layer",
+            mod_mask:    None,
+            category:    "Layer-Tap",
+        },
+        QuantumKeyType {
+            name:        "MO",
+            description: "Momentary layer — active while held",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "TG",
+            description: "Toggle layer on/off",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "TO",
+            description: "Turn on layer (deactivates all others)",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "TT",
+            description: "Layer on hold, toggle on tap",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "DF",
+            description: "Set default base layer",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "OSL",
+            description: "One-Shot Layer — active for next keypress only",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+        QuantumKeyType {
+            name:        "LM",
+            description: "Activate layer with modifier(s) applied",
+            mod_mask:    None,
+            category:    "Layer",
+        },
+    ]
+}
+
+/// Default quantum keycode configurations — returns commonly used presets.
+/// Each entry is (display_name, keycode_raw_value).
+pub fn quantum_keycode_defaults() -> Vec<(&'static str, u16)> {
+    let mut defaults = Vec::new();
+
+    // Home-row mod presets (LSFT_T on common keys)
+    let home_row_keys: &[(u8, &str)] = &[
+        (0x04, "A"),
+        (0x16, "S"),
+        (0x07, "D"),
+        (0x09, "F"),
+        (0x0D, "J"),
+        (0x0E, "K"),
+        (0x0F, "L"),
+    ];
+
+    for &(kc, _name) in home_row_keys {
+        defaults.push(("LSFT_T", Keycode::lsft_t(kc).raw()));
+        defaults.push(("LCTL_T", Keycode::lctl_t(kc).raw()));
+        defaults.push(("LALT_T", Keycode::lalt_t(kc).raw()));
+        defaults.push(("LGUI_T", Keycode::lgui_t(kc).raw()));
+    }
+
+    // One-shot modifiers
+    defaults.push(("OSM(Ctrl)", Keycode::one_shot_mod(0x01).raw()));
+    defaults.push(("OSM(Shift)", Keycode::one_shot_mod(0x02).raw()));
+    defaults.push(("OSM(Alt)", Keycode::one_shot_mod(0x04).raw()));
+    defaults.push(("OSM(GUI)", Keycode::one_shot_mod(0x08).raw()));
+    defaults.push(("OSM(Meh)", Keycode::one_shot_mod(0x07).raw()));
+    defaults.push(("OSM(Hyper)", Keycode::one_shot_mod(0x0F).raw()));
+
+    defaults
 }

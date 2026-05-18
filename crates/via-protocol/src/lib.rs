@@ -38,9 +38,13 @@ pub use keycodes::{
     Keycode,
     KeycodeCategory,
     KeycodeGroup,
+    QuantumKeyType,
     all_basic_keycodes,
     keycode_groups,
     mod_mask_to_string,
+    mod_tap_prefix,
+    quantum_key_types,
+    quantum_keycode_defaults,
 };
 pub use layout::{
     KeyPosition,
