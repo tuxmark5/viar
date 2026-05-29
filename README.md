@@ -28,6 +28,8 @@ Preview of a keyboard layout with homerow mods as Tap Dances and with combos. Co
 
 ```
 crates/
+  qmk-rs/         # Library: Experimental Simple qmk settings library for on-board qmk settings
+  argos-rs/       # Library: Experimental rust port of the argos module by BastardKB
   via-protocol/   # Library: VIA/Vial HID protocol implementation
   viar/           # Binary: egui desktop application
 ```
