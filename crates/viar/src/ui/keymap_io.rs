@@ -1,0 +1,208 @@
+//! Import / export of the keymap to and from a JSON file on disk.
+
+use tracing::{
+    info,
+    warn,
+};
+use via_protocol::{
+    Keycode,
+    ViaProtocol,
+};
+
+use crate::types::{
+    StatusMessage,
+    ViarApp,
+};
+
+impl ViarApp {
+    pub fn reload_keymap(&mut self) {
+        if let (Some(dev), Some(data)) = (&self.connected_device, &mut self.keymap_data) {
+            let proto = ViaProtocol::new(dev);
+            match proto.read_entire_keymap(data.layer_count, data.layout.rows, data.layout.cols) {
+                Ok(km) => {
+                    info!("keymap reloaded");
+                    data.keymap = km;
+                    data.dirty = false;
+                    data.undo_stack.clear();
+                    self.set_status(StatusMessage::info("Keymap reloaded from device"));
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to reload keymap");
+                    self.set_status(StatusMessage::error(format!("Reload failed: {e}")));
+                }
+            }
+        }
+    }
+
+    pub fn export_keymap(&mut self) {
+        let Some(data) = &self.keymap_data else {
+            return;
+        };
+
+        let mut layers = Vec::new();
+        for (layer_idx, layer) in data.keymap.iter().enumerate() {
+            let mut rows = Vec::new();
+            for (row_idx, row) in layer.iter().enumerate() {
+                let keys: Vec<serde_json::Value> = row
+                    .iter()
+                    .enumerate()
+                    .map(|(col_idx, &raw_kc)| {
+                        serde_json::json!({
+                            "col": col_idx,
+                            "raw": raw_kc,
+                            "name": Keycode(raw_kc).name(),
+                        })
+                    })
+                    .collect();
+                rows.push(serde_json::json!({
+                    "row": row_idx,
+                    "keys": keys,
+                }));
+            }
+            layers.push(serde_json::json!({
+                "layer": layer_idx,
+                "rows": rows,
+            }));
+        }
+
+        let dump = serde_json::json!({
+            "viar_version": 1,
+            "layout": data.layout.name,
+            "matrix_rows": data.layout.rows,
+            "matrix_cols": data.layout.cols,
+            "layer_count": data.layer_count,
+            "layers": layers,
+        });
+
+        let path = "viar_keymap.json";
+        let json_str = match serde_json::to_string_pretty(&dump) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "failed to serialize keymap");
+                self.set_status(StatusMessage::error(format!("Export failed: {e}")));
+                return;
+            }
+        };
+        match std::fs::write(path, json_str) {
+            Ok(_) => {
+                info!("keymap exported to {path}");
+                if let Some(data) = &mut self.keymap_data {
+                    data.dirty = false;
+                }
+                self.set_status(StatusMessage::info(format!("Exported to {path}")));
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to export keymap");
+                self.set_status(StatusMessage::error(format!("Export failed: {e}")));
+            }
+        }
+    }
+
+    pub fn import_keymap(&mut self) {
+        let path = "viar_keymap.json";
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "failed to read keymap file");
+                self.set_status(StatusMessage::error(format!("Import failed: {e}")));
+                return;
+            }
+        };
+
+        let json: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                self.set_status(StatusMessage::error(format!("Invalid JSON: {e}")));
+                return;
+            }
+        };
+
+        let Some(data) = &self.keymap_data else {
+            return;
+        };
+
+        let file_rows = json["matrix_rows"].as_u64().unwrap_or(0) as u8;
+        let file_cols = json["matrix_cols"].as_u64().unwrap_or(0) as u8;
+        let expected_rows = data.layout.rows;
+        let expected_cols = data.layout.cols;
+        let _ = data;
+
+        if file_rows != expected_rows || file_cols != expected_cols {
+            self.set_status(StatusMessage::error(format!(
+                "Matrix mismatch: file is {file_rows}x{file_cols}, keyboard is {expected_rows}x{expected_cols}",
+            )));
+            return;
+        }
+
+        let Some(layers) = json["layers"].as_array() else {
+            self.set_status(StatusMessage::error("No layers array in file"));
+            return;
+        };
+
+        let Some(data) = &mut self.keymap_data else {
+            return;
+        };
+
+        let mut new_keymap = data.keymap.clone();
+        for layer_obj in layers {
+            let layer_idx = layer_obj["layer"].as_u64().unwrap_or(0) as usize;
+            if layer_idx >= new_keymap.len() {
+                continue;
+            }
+            let Some(rows) = layer_obj["rows"].as_array() else {
+                continue;
+            };
+            for row_obj in rows {
+                let row_idx = row_obj["row"].as_u64().unwrap_or(0) as usize;
+                if row_idx >= new_keymap[layer_idx].len() {
+                    continue;
+                }
+                let Some(keys) = row_obj["keys"].as_array() else {
+                    continue;
+                };
+                for key_obj in keys {
+                    let col_idx = key_obj["col"].as_u64().unwrap_or(0) as usize;
+                    let raw = key_obj["raw"].as_u64().unwrap_or(0) as u16;
+                    if col_idx < new_keymap[layer_idx][row_idx].len() {
+                        new_keymap[layer_idx][row_idx][col_idx] = raw;
+                    }
+                }
+            }
+        }
+
+        let mut changed = 0usize;
+        let mut errors = 0usize;
+        if let Some(dev) = &self.connected_device {
+            let proto = ViaProtocol::new(dev);
+            for (layer, layer_keys) in new_keymap.iter().enumerate() {
+                for (row, row_keys) in layer_keys.iter().enumerate() {
+                    for (col, &new) in row_keys.iter().enumerate() {
+                        let old = data.keymap[layer][row][col];
+                        if old != new {
+                            match proto.set_keycode(layer as u8, row as u8, col as u8, new) {
+                                Ok(()) => changed += 1,
+                                Err(e) => {
+                                    warn!(error = %e, layer, row, col, "failed to write key");
+                                    errors += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        data.keymap = new_keymap;
+
+        if errors > 0 {
+            self.set_status(StatusMessage::error(format!(
+                "Imported with {errors} write errors ({changed} keys updated)"
+            )));
+        } else {
+            info!(changed, "keymap imported from {path}");
+            self.set_status(StatusMessage::info(format!(
+                "Imported {changed} key changes from {path}"
+            )));
+        }
+    }
+}
