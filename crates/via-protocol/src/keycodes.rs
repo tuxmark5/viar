@@ -233,6 +233,13 @@ impl Keycode {
         }
     }
 
+    /// Canonical QMK keycode name (e.g. `KC_A`, `KC_SEMICOLON`), from QMK's
+    /// `quantum/keycodes.h`. `None` for parametric keycodes (mod-tap, layer-tap,
+    /// …) whose names are composed at runtime — use [`Self::name`] for those.
+    pub fn qmk_name(self) -> Option<&'static str> {
+        crate::qmk_names::qmk_keycode_name(self.0)
+    }
+
     /// Get a short label (for rendering on small key caps).
     /// Truncates to fit in tight spaces.
     pub fn short_name(self) -> String {

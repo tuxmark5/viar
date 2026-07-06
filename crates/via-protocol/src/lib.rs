@@ -9,6 +9,7 @@ mod error;
 mod keycodes;
 pub mod layout;
 mod protocol;
+mod qmk_names;
 
 pub use command::{
     ComboEntry,

@@ -505,6 +505,20 @@ fn render_picker_tabs(
     (quantum_tab_idx, builder_tab_idx)
 }
 
+/// Hover tooltip for a picker keycode button: the canonical QMK name (e.g.
+/// `KC_SEMICOLON`) above the human description. Parametric keycodes (mod-tap,
+/// layer-tap, …) have no fixed QMK name, so fall back to the display name.
+fn keycode_tooltip(response: egui::Response, kc: Keycode) -> egui::Response {
+    response.on_hover_ui(|ui| {
+        let qmk = kc
+            .qmk_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| kc.name());
+        ui.label(egui::RichText::new(qmk).monospace().strong());
+        ui.label(kc.description());
+    })
+}
+
 /// "My Quantum" favorites grid. Returns a clicked keycode, if any.
 fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -> Option<u16> {
     let mut picked_kc = None;
@@ -575,7 +589,7 @@ fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -
                     if response.clicked() {
                         picked_kc = Some(fav_raw);
                     }
-                    response.on_hover_text(kc.description());
+                    keycode_tooltip(response, kc);
                 }
             });
         });
@@ -652,7 +666,7 @@ fn render_keycode_grid(
                     if response.clicked() {
                         picked_kc = Some(kc.0);
                     }
-                    response.on_hover_text(kc.description());
+                    keycode_tooltip(response, *kc);
                 }
             });
         });
