@@ -179,6 +179,16 @@ impl ViarApp {
                     data.selected = None;
                 } else {
                     data.selected = Some(target);
+                    // Open the picker on the tab that holds this slot's current
+                    // keycode (e.g. F5 opens the "F-Keys" group).
+                    let kc = data.target_keycode(layer_idx, target);
+                    if let Some(group) = self
+                        .picker_groups
+                        .iter()
+                        .position(|g| g.codes.iter().any(|c| c.0 == kc))
+                    {
+                        self.picker_selected_group = group;
+                    }
                 }
             }
 
