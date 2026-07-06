@@ -198,51 +198,51 @@ impl ViarApp {
         }
         self.detected_features = features;
 
-        // Try Vial definition first, then VIA JSON from config dir, then generic
+        // A user JSON in the config dir overrides everything (lets you customise
+        // any keyboard's layout); otherwise use the firmware Vial definition;
+        // otherwise a generic grid.
         let mut layout_warning: Option<String> = None;
-        let layout = match proto.vial_get_definition() {
-            Ok(json) => {
-                info!("got Vial definition from firmware, parsing KLE layout");
-                match parse_vial_definition(&json) {
-                    Ok(mut layout) => {
-                        // Set the name from device info if the definition didn't have one
-                        if layout.name == "Vial Keyboard" {
-                            layout.name = format!("{}", info);
+        let layout = if let Some(mut layout) =
+            load_via_definition(info.vendor_id, info.product_id)
+        {
+            info!("loaded JSON definition override from config directory");
+            if layout.name == "Vial Keyboard" {
+                layout.name = format!("{}", info);
+            }
+            layout
+        } else {
+            match proto.vial_get_definition() {
+                Ok(json) => {
+                    info!("got Vial definition from firmware, parsing KLE layout");
+                    match parse_vial_definition(&json) {
+                        Ok(mut layout) => {
+                            // Name from device info if the definition didn't have one
+                            if layout.name == "Vial Keyboard" {
+                                layout.name = format!("{}", info);
+                            }
+                            layout
                         }
-                        layout
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to parse Vial definition, falling back to generic layout");
-                        layout_warning = Some(format!(
-                            "Failed to parse keyboard layout: {e}. Using generic grid."
-                        ));
-                        generic_layout(4, 12)
+                        Err(e) => {
+                            warn!(error = %e, "failed to parse Vial definition, falling back to generic layout");
+                            layout_warning = Some(format!(
+                                "Failed to parse keyboard layout: {e}. Using generic grid."
+                            ));
+                            generic_layout(4, 12)
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                debug!(error = %e, "no Vial definition available, trying VIA JSON definition");
-                // Try to load a VIA JSON definition from the config directory
-                match load_via_definition(info.vendor_id, info.product_id) {
-                    Some(mut layout) => {
-                        info!("loaded VIA JSON definition from config directory");
-                        if layout.name == "Vial Keyboard" {
-                            layout.name = format!("{}", info);
-                        }
-                        layout
-                    }
-                    None => {
-                        layout_warning = Some(format!(
-                            "No Vial firmware and no VIA JSON definition found. Using generic grid.\n\
-                             To fix: place a VIA JSON definition at {}",
-                            via_definition_path(info.vendor_id, info.product_id)
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_else(
-                                    || "~/.config/viar/definitions/<vid>_<pid>.json".into()
-                                )
-                        ));
-                        generic_layout(4, 12)
-                    }
+                Err(e) => {
+                    debug!(error = %e, "no Vial firmware definition and no JSON override");
+                    layout_warning = Some(format!(
+                        "No Vial firmware and no JSON definition found. Using generic grid.\n\
+                         To fix: place a JSON definition at {}",
+                        via_definition_path(info.vendor_id, info.product_id)
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(
+                                || "~/.config/viar/definitions/<vid>_<pid>.json".into()
+                            )
+                    ));
+                    generic_layout(4, 12)
                 }
             }
         };
