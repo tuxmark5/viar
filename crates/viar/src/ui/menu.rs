@@ -2,7 +2,6 @@ use eframe::egui;
 use tracing::debug;
 
 use crate::types::{
-    AppScreen,
     ConfirmAction,
     ConfirmDialog,
     ViarApp,
@@ -34,10 +33,7 @@ impl ViarApp {
                 if self.connected_device.is_some() {
                     ui.menu_button("Device", |ui| {
                         if ui.button("Switch Keyboard...").clicked() {
-                            self.connected_device = None;
-                            self.protocol_version = None;
-                            self.keymap_data = None;
-                            self.screen = AppScreen::SelectKeyboard;
+                            self.go_to_select_keyboard();
                             ui.close();
                         }
                         ui.separator();

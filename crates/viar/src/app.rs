@@ -553,11 +553,9 @@ impl ViarApp {
         self.screen = AppScreen::Connected;
     }
 
-    pub fn disconnect(&mut self) {
-        if self.connected_device.is_none() {
-            return;
-        }
-        info!("disconnecting from keyboard");
+    /// Reset all state tied to the currently-connected keyboard. The caller is
+    /// responsible for choosing the next screen and any status message.
+    fn clear_connection(&mut self) {
         self.connected_device = None;
         self.protocol_version = None;
         self.vial_protocol_version = None;
@@ -571,23 +569,35 @@ impl ViarApp {
         self.pointing_data = None;
         self.qmk_settings_data = None;
         self.active_tab = ConnectedTab::Keymap;
+    }
+
+    /// Disconnect and re-scan for devices (auto-connecting if only one is found).
+    pub fn disconnect(&mut self) {
+        if self.connected_device.is_none() {
+            return;
+        }
+        info!("disconnecting from keyboard");
+        self.clear_connection();
         self.refresh();
     }
 
+    /// Disconnect the current keyboard and return to the selection screen,
+    /// keeping the already-discovered keyboard list (unlike [`Self::disconnect`],
+    /// this does not re-scan or auto-connect).
+    pub fn go_to_select_keyboard(&mut self) {
+        if self.connected_device.is_none() {
+            return;
+        }
+        info!("returning to keyboard selection");
+        self.clear_connection();
+        self.status = None;
+        self.screen = AppScreen::SelectKeyboard;
+    }
+
+    /// React to an unexpected disconnect while talking to the device.
     pub fn handle_disconnect(&mut self) {
         warn!("device disconnected unexpectedly");
-        self.connected_device = None;
-        self.protocol_version = None;
-        self.vial_protocol_version = None;
-        self.vial_uid = None;
-        self.firmware_version = None;
-        self.connect_uptime_ms = None;
-        self.detected_features.clear();
-        self.lighting_data = None;
-        self.dynamic_data = None;
-        self.pointing_data = None;
-        self.qmk_settings_data = None;
-        self.active_tab = ConnectedTab::Keymap;
+        self.clear_connection();
         self.screen = AppScreen::NoKeyboards;
         self.set_status(StatusMessage::error(
             "Keyboard disconnected. Plug it back in and click Refresh.",
@@ -610,6 +620,23 @@ impl eframe::App for ViarApp {
         // Ctrl+Z for undo
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
             self.undo();
+        }
+
+        // Escape returns to keyboard selection. An open keycode picker or a
+        // confirm dialog consumes Escape first (the picker closes during `ui`,
+        // which runs after this), so only go back when neither is showing.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape))
+            && matches!(self.screen, AppScreen::Connected)
+            && self.confirm_dialog.is_none()
+        {
+            let picker_open = self.active_tab == ConnectedTab::Keymap
+                && self
+                    .keymap_data
+                    .as_ref()
+                    .is_some_and(|d| d.selected.is_some());
+            if !picker_open {
+                self.go_to_select_keyboard();
+            }
         }
 
         // Update title with dirty indicator
