@@ -11,6 +11,7 @@ use super::{
     ConfirmDialog,
     ConnectedTab,
     DynamicEntryData,
+    KeyFlash,
     KeymapData,
     LightingData,
     PointingData,
@@ -76,4 +77,8 @@ pub struct ViarApp {
     pub detected_features: Vec<String>,
     /// User-generated quantum keycodes (mod-tap, OSM, etc.) for quick picker access
     pub quantum_favorites: Vec<u16>,
+    /// Keycode copied from a slot (shift+right-click) for pasting (shift+left-click)
+    pub copied_keycode: Option<u16>,
+    /// Active copy/paste flash animation on a slot, if any.
+    pub flash: Option<KeyFlash>,
 }

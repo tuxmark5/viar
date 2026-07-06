@@ -12,6 +12,8 @@ use crate::{
     types::{
         DynamicEntryData,
         EditTarget,
+        FlashKind,
+        KeyFlash,
         KeymapData,
         ViarApp,
     },
@@ -66,6 +68,20 @@ const COL_FAV_BORDER: egui::Color32 = egui::Color32::from_rgb(70, 100, 140);
 /// Hold/sub label on a split favorite cell.
 const COL_FAV_HOLD_LABEL: egui::Color32 = egui::Color32::from_rgb(150, 180, 220);
 
+/// Pulse color for a "copied" flash.
+const COL_FLASH_COPY: egui::Color32 = egui::Color32::from_rgb(120, 200, 255);
+/// Pulse color for a "pasted" flash.
+const COL_FLASH_PASTE: egui::Color32 = egui::Color32::from_rgb(130, 230, 150);
+/// How long the copy/paste pulse animation lasts, in seconds.
+const FLASH_DURATION: f64 = 0.45;
+
+fn flash_color(kind: FlashKind) -> egui::Color32 {
+    match kind {
+        FlashKind::Copy => COL_FLASH_COPY,
+        FlashKind::Paste => COL_FLASH_PASTE,
+    }
+}
+
 impl ViarApp {
     pub fn render_keymap_tab(&mut self, ui: &mut egui::Ui) {
         // Clone aliases up front so the picker can borrow them without holding
@@ -83,10 +99,21 @@ impl ViarApp {
         let combo_map = build_combo_map(self.dynamic_data.as_ref());
         let td_labels = build_td_labels(self.dynamic_data.as_ref());
 
+        // Copy/paste pulse for this frame: (slot, 0..1 progress, color). Keep the
+        // frame repainting while it plays out.
+        let now = ui.input(|i| i.time);
+        let flash = self.flash.and_then(|f| {
+            let progress = ((now - f.start) / FLASH_DURATION) as f32;
+            (progress < 1.0).then(|| (f.target, progress, flash_color(f.kind)))
+        });
+        if flash.is_some() {
+            ui.ctx().request_repaint();
+        }
+
         // --- Layer tabs, keyboard render, and selection handling ---
         // Scoped so the keymap_data borrow is released before the picker
         // (a &mut self method) runs.
-        let (selected, selected_rect, layer_idx) = {
+        let (selected, selected_rect, layer_idx, copy, paste) = {
             let data = self.keymap_data.as_mut().unwrap();
 
             ui.horizontal(|ui| {
@@ -131,11 +158,14 @@ impl ViarApp {
                     combo_map: &combo_map,
                     td: &td_labels,
                     aliases: aliases_ref,
+                    flash,
                 };
                 render_keyboard(ui, &ctx)
             };
             let clicked = render.clicked;
             let selected_rect = render.selected_rect;
+            let copy = render.copy;
+            let paste = render.paste;
 
             // Toggle selection on click
             if let Some(target) = clicked {
@@ -151,8 +181,9 @@ impl ViarApp {
                 data.selected = None;
             }
 
-            // Close picker on click outside slots and picker
-            if data.selected.is_some() && clicked.is_none() {
+            // Close picker on click outside slots and picker (a shift+left paste
+            // lands on a slot, not "outside", so it shouldn't close the picker).
+            if data.selected.is_some() && clicked.is_none() && paste.is_none() {
                 let click_pos = ui.input(|i| {
                     if i.pointer.primary_clicked() {
                         i.pointer.interact_pos()
@@ -172,8 +203,36 @@ impl ViarApp {
                 }
             }
 
-            (data.selected, selected_rect, layer_idx)
+            (data.selected, selected_rect, layer_idx, copy, paste)
         };
+
+        // Copy / paste a slot's keycode (shift + right/left click), pulsing the
+        // affected slot.
+        if let Some(target) = copy {
+            self.copy_slot(target);
+            self.flash = Some(KeyFlash {
+                target,
+                start: now,
+                kind: FlashKind::Copy,
+            });
+            ui.ctx().request_repaint();
+        }
+        if let Some(target) = paste {
+            let pasted = self.copied_keycode.is_some();
+            self.paste_slot(target);
+            if pasted {
+                self.flash = Some(KeyFlash {
+                    target,
+                    start: now,
+                    kind: FlashKind::Paste,
+                });
+                ui.ctx().request_repaint();
+            }
+        }
+        // Drop a finished flash so it doesn't linger in state.
+        if self.flash.is_some_and(|f| now - f.start >= FLASH_DURATION) {
+            self.flash = None;
+        }
 
         // Floating popover picker (runs with keymap_data borrow released)
         if let (Some(target), Some(rect)) = (selected, selected_rect) {
@@ -737,13 +796,19 @@ struct KeymapRender<'a> {
     combo_map: &'a HashMap<u16, Vec<ComboInfo>>,
     td:        &'a TdLabels,
     aliases:   Option<&'a HashMap<String, String>>,
+    /// Active copy/paste pulse: (flashing slot, 0..1 progress, color).
+    flash:     Option<(EditTarget, f32, egui::Color32)>,
 }
 
 /// Interaction outcome of rendering keys / encoders for a frame.
 #[derive(Default)]
 struct RenderResult {
-    /// The slot clicked this frame, if any.
+    /// The slot clicked this frame (plain left-click), if any.
     clicked:       Option<EditTarget>,
+    /// Slot whose keycode should be copied (shift + right-click).
+    copy:          Option<EditTarget>,
+    /// Slot the copied keycode should be pasted into (shift + left-click).
+    paste:         Option<EditTarget>,
     /// Screen rect of the selected slot, for anchoring the picker.
     selected_rect: Option<egui::Rect>,
 }
@@ -755,10 +820,63 @@ impl RenderResult {
         if other.clicked.is_some() {
             self.clicked = other.clicked;
         }
+        if other.copy.is_some() {
+            self.copy = other.copy;
+        }
+        if other.paste.is_some() {
+            self.paste = other.paste;
+        }
         if other.selected_rect.is_some() {
             self.selected_rect = other.selected_rect;
         }
     }
+}
+
+/// Classify a click on a hovered slot into select / copy / paste based on the
+/// mouse button and Shift modifier.
+fn slot_click(ui: &egui::Ui, is_hovered: bool, target: EditTarget) -> RenderResult {
+    if !is_hovered {
+        return RenderResult::default();
+    }
+    let (primary, secondary, shift) = ui.input(|i| {
+        (
+            i.pointer.primary_clicked(),
+            i.pointer.secondary_clicked(),
+            i.modifiers.shift,
+        )
+    });
+    RenderResult {
+        // Plain left-click selects; Shift+left-click pastes.
+        clicked:       (primary && !shift).then_some(target),
+        paste:         (primary && shift).then_some(target),
+        // Shift+right-click copies.
+        copy:          (secondary && shift).then_some(target),
+        selected_rect: None,
+    }
+}
+
+/// Draw the copy/paste pulse on `rect` if `target` is the currently flashing
+/// slot: a ring that fades out and expands outward over the flash duration.
+fn draw_slot_flash(
+    painter: &egui::Painter,
+    ctx: &KeymapRender,
+    rect: egui::Rect,
+    rounding: egui::CornerRadius,
+    target: EditTarget,
+) {
+    let Some((flash_target, progress, color)) = ctx.flash else {
+        return;
+    };
+    if flash_target != target {
+        return;
+    }
+    let flash_rect = rect.expand(progress * 4.0);
+    painter.rect_stroke(
+        flash_rect,
+        rounding,
+        egui::Stroke::new(2.0_f32, color.gamma_multiply(1.0 - progress)),
+        egui::StrokeKind::Outside,
+    );
 }
 
 /// Draw the whole keyboard — every keycap and encoder — for the selected layer,
@@ -897,16 +1015,15 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
         }
     }
 
-    let clicked = is_hovered && ui.input(|i| i.pointer.primary_clicked());
+    draw_slot_flash(painter, ctx, rect, rounding, EditTarget::Key(key_idx));
 
     if is_hovered {
         render_key_tooltip(ui, ctx, key_idx, key_pos.row, key_pos.col, raw_kc, &label);
     }
 
-    RenderResult {
-        clicked:       clicked.then_some(EditTarget::Key(key_idx)),
-        selected_rect: is_selected.then_some(rect),
-    }
+    let mut result = slot_click(ui, is_hovered, EditTarget::Key(key_idx));
+    result.selected_rect = is_selected.then_some(rect);
+    result
 }
 
 /// Hover tooltip for a key: keycode name + hex + matrix position, plus any
@@ -1272,9 +1389,9 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
         text_color,
     );
 
-    let clicked = is_hovered && ui.input(|i| i.pointer.primary_clicked());
-    RenderResult {
-        clicked:       clicked.then_some(slot.target),
-        selected_rect: is_selected.then_some(slot.rect),
-    }
+    draw_slot_flash(painter, ctx, slot.rect, slot.rounding, slot.target);
+
+    let mut result = slot_click(ui, is_hovered, slot.target);
+    result.selected_rect = is_selected.then_some(slot.rect);
+    result
 }

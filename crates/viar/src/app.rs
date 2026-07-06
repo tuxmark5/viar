@@ -57,6 +57,8 @@ impl ViarApp {
             connect_uptime_ms: None,
             detected_features: Vec::new(),
             quantum_favorites: Vec::new(),
+            copied_keycode: None,
+            flash: None,
         }
     }
 

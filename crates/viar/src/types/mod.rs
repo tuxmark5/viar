@@ -23,6 +23,8 @@ pub use dynamic::{
 pub use keymap::{
     EditChange,
     EditTarget,
+    FlashKind,
+    KeyFlash,
     KeymapData,
     KeymapLayer,
 };

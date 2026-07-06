@@ -19,6 +19,23 @@ pub struct EditChange {
     pub old:    u16,
 }
 
+/// Which copy/paste action triggered a slot's flash animation.
+#[derive(Clone, Copy)]
+pub enum FlashKind {
+    Copy,
+    Paste,
+}
+
+/// A transient highlight on a slot after a copy/paste, animated out over a short
+/// duration.
+#[derive(Clone, Copy)]
+pub struct KeyFlash {
+    pub target: EditTarget,
+    /// egui time (seconds) when the flash started.
+    pub start:  f64,
+    pub kind:   FlashKind,
+}
+
 /// The keycodes for one layer: the key matrix plus per-encoder rotation codes.
 #[derive(Clone, Default)]
 pub struct KeymapLayer {

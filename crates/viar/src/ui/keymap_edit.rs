@@ -44,6 +44,27 @@ impl ViarApp {
         self.write_target(target, layer, matrix, new_keycode, "Set");
     }
 
+    /// Copy a slot's current keycode into the clipboard (shift + right-click).
+    pub fn copy_slot(&mut self, target: EditTarget) {
+        let Some(data) = &self.keymap_data else {
+            return;
+        };
+        let kc = data.target_keycode(data.selected_layer, target);
+        self.copied_keycode = Some(kc);
+        self.set_status(StatusMessage::info(format!(
+            "Copied {}",
+            Keycode(kc).name()
+        )));
+    }
+
+    /// Paste the clipboard keycode into a slot (shift + left-click).
+    pub fn paste_slot(&mut self, target: EditTarget) {
+        match self.copied_keycode {
+            Some(kc) => self.apply_edit(target, kc),
+            None => self.set_status(StatusMessage::info("Nothing to paste")),
+        }
+    }
+
     pub fn undo(&mut self) {
         let Some(data) = &mut self.keymap_data else {
             return;
