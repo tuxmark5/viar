@@ -35,6 +35,24 @@ pub fn themed_tab(
     label: impl Into<egui::WidgetText>,
     theme: &Theme,
 ) -> egui::Response {
+    // Keep the hover/active outline but stop it from resizing the tab. A button
+    // frame's footprint is `content + button_padding` regardless of border,
+    // because egui shrinks the frame's inner margin by `bg_stroke.width` to make
+    // room for the stroke. But an *unselected* tab renders through egui's
+    // stroke-less frame path, so it inherits that shrunk margin without paying it
+    // back as a border — leaving it 2px narrower than the hovered state and
+    // making the row shift on hover. Dropping the inactive border width restores
+    // the full inner margin, so every state reserves the same space; the
+    // hovered/active borders (from the theme) still draw.
+    {
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        widgets.inactive.expansion = 0.0;
+        widgets.hovered.expansion = 0.0;
+        widgets.active.expansion = 0.0;
+        widgets.open.expansion = 0.0;
+    }
+
     if selected {
         // Override text color for selected state to ensure contrast against accent bg
         ui.visuals_mut().override_text_color = Some(theme.text_on_accent());
