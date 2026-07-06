@@ -168,9 +168,14 @@ impl<'a> ViaProtocol<'a> {
         Ok(u16::from_be_bytes([resp[1], resp[2]]))
     }
 
-    /// Get the Vial keyboard ID, protocol version, and UID.
-    /// Returns (vial_protocol_version, uid_bytes).
-    pub fn vial_get_keyboard_id(&self) -> ViaResult<(u32, [u8; 8])> {
+    /// Get the Vial keyboard ID (protocol version + UID), or `None` if this is
+    /// not a Vial keyboard.
+    ///
+    /// VIA-only firmware doesn't implement the Vial command and replies with the
+    /// `0xFF` "unhandled" sentinel in the first byte; some report protocol
+    /// version 0. Either way there is no Vial definition to fetch, so callers
+    /// should fall back to a VIA JSON definition.
+    pub fn vial_get_keyboard_id(&self) -> ViaResult<Option<(u32, [u8; 8])>> {
         let resp = self
             .device
             .send_command(&ViaCommand::vial_get_keyboard_id())?;
@@ -178,11 +183,19 @@ impl<'a> ViaProtocol<'a> {
         // msg[0..3] = VIAL_PROTOCOL_VERSION (u32 LE)
         // msg[4..11] = keyboard UID (8 bytes)
         // msg[12] = vialrgb flag (optional)
+        if resp[0] == 0xFF {
+            info!("vial keyboard ID: VIA unhandled sentinel, not a Vial keyboard");
+            return Ok(None);
+        }
         let version = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
+        if version == 0 {
+            info!("vial keyboard ID: protocol version 0, not a Vial keyboard");
+            return Ok(None);
+        }
         let mut uid = [0u8; 8];
         uid.copy_from_slice(&resp[4..12]);
         info!(vial_protocol_version = version, uid = ?uid, "vial keyboard ID");
-        Ok((version, uid))
+        Ok(Some((version, uid)))
     }
 
     /// Get the size of the compressed Vial keyboard definition.
@@ -197,10 +210,10 @@ impl<'a> ViaProtocol<'a> {
     /// Fetch and decompress the full Vial keyboard definition JSON.
     /// Returns the parsed JSON string.
     pub fn vial_get_definition(&self) -> ViaResult<String> {
-        // First check if this is a Vial keyboard
-        let (version, _uid) = self.vial_get_keyboard_id()?;
-        if version == 0 {
-            return Err(ViaError::Protocol("not a Vial keyboard (version 0)".into()));
+        // Only a genuine Vial keyboard has an embedded definition to fetch;
+        // VIA-only boards fall back to a VIA JSON definition instead.
+        if self.vial_get_keyboard_id()?.is_none() {
+            return Err(ViaError::Protocol("not a Vial keyboard".into()));
         }
 
         let size = self.vial_get_definition_size()? as usize;

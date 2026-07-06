@@ -163,9 +163,11 @@ let layout = parse_vial_definition(&json).unwrap();
 Vial-enabled keyboards store a compressed layout definition in firmware. Retrieve it with:
 
 ```rust
-let (uid, _flags) = proto.vial_get_keyboard_id().unwrap();
-let definition = proto.vial_get_definition().unwrap(); // serde_json::Value
-let layout = parse_vial_definition(&definition).unwrap();
+// `None` if this is a VIA-only keyboard (no Vial definition to fetch).
+if let Some((version, _uid)) = proto.vial_get_keyboard_id().unwrap() {
+    let definition = proto.vial_get_definition().unwrap(); // serde_json::Value
+    let layout = parse_vial_definition(&definition).unwrap();
+}
 ```
 
 The definition is fetched in chunks and LZMA-decompressed automatically.

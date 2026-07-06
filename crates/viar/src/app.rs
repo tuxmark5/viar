@@ -173,8 +173,8 @@ impl ViarApp {
         let info = &dev.info;
         let proto = ViaProtocol::new(dev);
 
-        // Capture Vial protocol info
-        if let Ok((vial_ver, uid)) = proto.vial_get_keyboard_id() {
+        // Capture Vial protocol info (None for VIA-only keyboards)
+        if let Ok(Some((vial_ver, uid))) = proto.vial_get_keyboard_id() {
             self.vial_protocol_version = Some(vial_ver);
             self.vial_uid = Some(uid);
         }
