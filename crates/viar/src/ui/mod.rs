@@ -3,6 +3,7 @@ pub mod combos_tab;
 pub mod connected;
 pub mod key_overrides_tab;
 pub mod keycode_builder;
+pub mod keymap_edit;
 pub mod keymap_io;
 pub mod keymap_tab;
 pub mod lighting_tab;
