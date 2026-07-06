@@ -391,7 +391,7 @@ fn render_picker_header(
     kc_category: &str,
 ) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(header).strong().size(17.0));
+        ui.label(egui::RichText::new(header).color(COL_TEXT).size(17.0));
         ui.separator();
         ui.label(
             egui::RichText::new(format!("{kc_name}  {:#06x}", raw_kc))
@@ -514,8 +514,8 @@ fn keycode_tooltip(response: egui::Response, kc: Keycode) -> egui::Response {
             .qmk_name()
             .map(str::to_string)
             .unwrap_or_else(|| kc.name());
-        ui.label(egui::RichText::new(qmk).monospace().strong());
-        ui.label(kc.description());
+        ui.label(egui::RichText::new(qmk).monospace().color(COL_TEXT));
+        ui.label(egui::RichText::new(kc.description()).color(COL_KC_NAME));
     })
 }
 
