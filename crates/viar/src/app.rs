@@ -109,6 +109,7 @@ impl ViarApp {
             }
             DetectResult::Ok { api, keyboards } => {
                 self.keyboards = keyboards;
+                self.sort_keyboards();
                 self.hid_api = Some(api);
                 if self.keyboards.len() == 1 {
                     self.connect_to_keyboard(0);
@@ -117,6 +118,13 @@ impl ViarApp {
                 }
             }
         }
+    }
+
+    /// Sort discovered keyboards by display name (manufacturer + product), so the
+    /// selection list has a stable, alphabetical order.
+    fn sort_keyboards(&mut self) {
+        self.keyboards
+            .sort_by_cached_key(|kb| format!("{} {}", kb.manufacturer, kb.product).to_lowercase());
     }
 
     pub fn refresh(&mut self) {
@@ -137,6 +145,7 @@ impl ViarApp {
                 return;
             }
             self.keyboards = discover_keyboards(api);
+            self.sort_keyboards();
             if self.keyboards.is_empty() {
                 self.screen = AppScreen::NoKeyboards;
             } else if self.keyboards.len() == 1 {
@@ -202,8 +211,7 @@ impl ViarApp {
         // any keyboard's layout); otherwise use the firmware Vial definition;
         // otherwise a generic grid.
         let mut layout_warning: Option<String> = None;
-        let layout = if let Some(mut layout) =
-            load_via_definition(info.vendor_id, info.product_id)
+        let layout = if let Some(mut layout) = load_via_definition(info.vendor_id, info.product_id)
         {
             info!("loaded JSON definition override from config directory");
             if layout.name == "Vial Keyboard" {
