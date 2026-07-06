@@ -25,7 +25,6 @@ use crate::{
     util::{
         CategoryStyle,
         action_name,
-        aliased_name,
         themed_tab,
     },
 };
@@ -211,14 +210,13 @@ impl ViarApp {
                     data.selected = None;
                 } else {
                     data.selected = Some(target);
-                    // Open on the tab that holds this slot's current keycode
-                    // (e.g. F5 opens the "F-Keys" group). Groups are in the
-                    // canonical scheme, so encode the action to match.
-                    let kc = NewEncoding.encode(data.target_keycode(layer_idx, target));
+                    // Open on the tab that holds this slot's current action
+                    // (e.g. F5 opens the "F-Keys" group).
+                    let kc = data.target_keycode(layer_idx, target);
                     if let Some(group) = self
                         .picker_groups
                         .iter()
-                        .position(|g| g.codes.iter().any(|c| c.0 == kc))
+                        .position(|g| g.codes.iter().any(|c| *c == kc))
                     {
                         self.picker_selected_group = group;
                     }
@@ -281,17 +279,18 @@ impl ViarApp {
     ) {
         // Snapshot the slot's current keycode / header, then release the
         // keymap_data borrow so the picker body can freely touch other self fields.
-        let (raw_kc, device_raw, header, kc_name, kc_category) = {
+        let (current, raw_kc, device_raw, header, kc_name, kc_category) = {
             let Some(data) = self.keymap_data.as_ref() else {
                 return;
             };
             let action = data.target_keycode(layer_idx, target);
-            // The grid/builder catalog is authored in the canonical (new) scheme,
-            // so highlight against a canonical raw; the header/hex show the real
-            // device raw so it matches the keycap.
+            // The grid highlights the current action directly. The builder /
+            // favorites still work in canonical raw values, and the header/hex
+            // show the real device raw so it matches the keycap.
             let raw_kc = NewEncoding.encode(action);
             let device_raw = self.encoding.encode(action);
             (
+                action,
                 raw_kc,
                 device_raw,
                 target_header(layer_idx, target, data),
@@ -336,22 +335,24 @@ impl ViarApp {
                 ui.separator();
                 ui.add_space(2.0);
 
-                // Keycode grid or builder UI
+                // Keycode grid or builder UI. The grid yields a `KeyAction`; the
+                // builder / favorites yield canonical raw values, decoded here.
                 let group_idx = self.picker_selected_group;
-                let picked_kc: Option<u16> = if group_idx == builder_tab_idx {
+                let picked: Option<KeyAction> = if group_idx == builder_tab_idx {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| render_keycode_builder(ui, raw_kc))
                         .inner
+                        .map(|u| NewEncoding.decode(u))
                 } else if has_quantum_favs && group_idx == quantum_tab_idx {
                     render_quantum_favorites(ui, &self.quantum_favorites, raw_kc)
+                        .map(|u| NewEncoding.decode(u))
                 } else {
-                    render_keycode_grid(ui, self.picker_groups.get(group_idx), raw_kc, aliases_ref)
+                    render_keycode_grid(ui, self.picker_groups.get(group_idx), current, aliases_ref)
                 };
 
-                if let Some(new_kc) = picked_kc {
-                    // Grid / builder emit canonical raw values; decode to an action.
-                    queue_pending_keycode(ui, NewEncoding.decode(new_kc), target);
+                if let Some(action) = picked {
+                    queue_pending_keycode(ui, action, target);
                 }
             });
 
@@ -536,14 +537,17 @@ fn render_picker_tabs(
 /// Hover tooltip for a picker keycode button: the canonical QMK name (e.g.
 /// `KC_SEMICOLON`) above the human description. Parametric keycodes (mod-tap,
 /// layer-tap, …) have no fixed QMK name, so fall back to the display name.
-fn keycode_tooltip(response: egui::Response, kc: Keycode) -> egui::Response {
+fn keycode_tooltip(response: egui::Response, action: KeyAction) -> egui::Response {
     response.on_hover_ui(|ui| {
-        let qmk = kc
+        let qmk = action
             .qmk_name()
             .map(str::to_string)
-            .unwrap_or_else(|| kc.name());
+            .unwrap_or_else(|| action.name());
         ui.label(egui::RichText::new(qmk).monospace().color(COL_TEXT));
-        ui.label(egui::RichText::new(kc.description()).color(COL_KC_NAME));
+        let desc = action.description();
+        if !desc.is_empty() {
+            ui.label(egui::RichText::new(desc).color(COL_KC_NAME));
+        }
     })
 }
 
@@ -556,8 +560,8 @@ fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                 for &fav_raw in favorites {
-                    let kc = Keycode(fav_raw);
-                    let name = kc.name();
+                    let action = NewEncoding.decode(fav_raw);
+                    let name = action.name();
                     let is_current = fav_raw == raw_kc;
                     let size = egui::vec2(56.0, 36.0);
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -586,7 +590,7 @@ fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -
                     );
 
                     // Dual-label rendering
-                    if let Some((tap, hold)) = kc.dual_labels() {
+                    if let Some((tap, hold)) = action.dual_labels() {
                         let top = egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.32);
                         ui.painter().text(
                             top,
@@ -617,21 +621,21 @@ fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -
                     if response.clicked() {
                         picked_kc = Some(fav_raw);
                     }
-                    keycode_tooltip(response, kc);
+                    keycode_tooltip(response, action);
                 }
             });
         });
     picked_kc
 }
 
-/// Standard keycode grid for a picker group. Returns a clicked keycode, if any.
+/// Standard keycode grid for a picker group. Returns a clicked action, if any.
 fn render_keycode_grid(
     ui: &mut egui::Ui,
     group: Option<&KeycodeGroup>,
-    raw_kc: u16,
+    current: KeyAction,
     aliases_ref: Option<&HashMap<String, String>>,
-) -> Option<u16> {
-    let mut picked_kc = None;
+) -> Option<KeyAction> {
+    let mut picked = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -640,9 +644,9 @@ fn render_keycode_grid(
                 let Some(group) = group else {
                     return;
                 };
-                for kc in &group.codes {
-                    let name = aliased_name(kc.0, aliases_ref);
-                    let is_current = kc.0 == raw_kc;
+                for &action in &group.codes {
+                    let name = action_name(action, aliases_ref);
+                    let is_current = action == current;
                     let size = egui::vec2(44.0, 28.0);
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                     let is_hovered = response.hovered();
@@ -652,7 +656,7 @@ fn render_keycode_grid(
                     } else if is_hovered {
                         COL_HOVER_BG
                     } else {
-                        kc.category().bg()
+                        action.category().bg()
                     };
                     let border = if is_current {
                         COL_SELECTED_BORDER
@@ -661,7 +665,7 @@ fn render_keycode_grid(
                     };
                     let text_col = if is_current {
                         egui::Color32::WHITE
-                    } else if kc.0 == 0 || kc.0 == 1 {
+                    } else if action.is_empty() {
                         COL_TEXT_DIM
                     } else {
                         COL_TEXT
@@ -692,13 +696,13 @@ fn render_keycode_grid(
                     );
 
                     if response.clicked() {
-                        picked_kc = Some(kc.0);
+                        picked = Some(action);
                     }
-                    keycode_tooltip(response, *kc);
+                    keycode_tooltip(response, action);
                 }
             });
         });
-    picked_kc
+    picked
 }
 
 // ===========================================================================

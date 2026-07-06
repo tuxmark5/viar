@@ -5,36 +5,17 @@ use via_protocol::{
     KeyAction,
     Keycode,
     KeycodeCategory,
+    KeycodeEncodingRef,
     KeycodeGroup,
 };
 
 use crate::theme::Theme;
 
-/// Resolve a raw keycode's name using aliases if available. For raw `u16` values
-/// (the dynamic-entry pickers and the keycode grid, which work in the canonical
-/// scheme).
-pub fn aliased_name(raw_kc: u16, aliases: Option<&HashMap<String, String>>) -> String {
-    if let Some(aliases) = aliases {
-        // Tap dance range: 0x5700..=0x57FF
-        if (0x5700..=0x57FF).contains(&raw_kc) {
-            let idx = (raw_kc & 0xFF) as usize;
-            let key = format!("td:{idx}");
-            if let Some(alias) = aliases.get(&key) {
-                if !alias.is_empty() {
-                    return alias.clone();
-                }
-            }
-        }
-    }
-    Keycode(raw_kc).name()
-}
-
-/// Resolve a decoded action's name using aliases if available (for keycaps).
-/// Tap-dance keys stay `Raw`, carrying their device keycode for the alias lookup.
+/// Resolve a decoded action's name using aliases if available (for keycaps and
+/// the picker grid). Tap-dance keys carry their index for the alias lookup.
 pub fn action_name(action: KeyAction, aliases: Option<&HashMap<String, String>>) -> String {
-    if let (Some(aliases), KeyAction::Raw(raw)) = (aliases, action)
-        && (0x5700..=0x57FF).contains(&raw)
-        && let Some(alias) = aliases.get(&format!("td:{}", raw & 0xFF))
+    if let (Some(aliases), KeyAction::TapDance(td)) = (aliases, action)
+        && let Some(alias) = aliases.get(&format!("td:{}", td.0))
         && !alias.is_empty()
     {
         return alias.clone();
@@ -227,9 +208,10 @@ pub struct PickerResult {
 }
 
 /// Render the shared keycode picker grid at the bottom of an editor panel.
-/// `current_value` is the value of the currently active field.
+/// `current_value` is the raw (device-scheme) value of the active field; the
+/// catalog is encoding-independent, so `encoding` maps its actions to raw values.
 /// `selected_group` / `groups` control the tab state.
-/// Returns whether a key was picked and the new value.
+/// Returns whether a key was picked and the new (raw) value.
 pub fn shared_keycode_picker(
     ui: &mut egui::Ui,
     current_value: u16,
@@ -238,6 +220,7 @@ pub fn shared_keycode_picker(
     active_field_label: &str,
     theme: &Theme,
     aliases: Option<&HashMap<String, String>>,
+    encoding: KeycodeEncodingRef,
 ) -> PickerResult {
     let mut result = PickerResult {
         selected: None,
@@ -316,9 +299,10 @@ pub fn shared_keycode_picker(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                 if let Some(group) = groups.get(*selected_group) {
-                    for kc in &group.codes {
-                        let kc_name = aliased_name(kc.0, aliases);
-                        let is_current = kc.0 == current_value;
+                    for &action in &group.codes {
+                        let raw = encoding.encode(action);
+                        let kc_name = action_name(action, aliases);
+                        let is_current = raw == current_value;
                         let size = egui::vec2(38.0, 22.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                         let is_hov = response.hovered();
@@ -363,9 +347,9 @@ pub fn shared_keycode_picker(
                         );
 
                         if response.clicked() {
-                            result.selected = Some(kc.0);
+                            result.selected = Some(raw);
                         }
-                        response.on_hover_text(kc.description());
+                        response.on_hover_text(action.description());
                     }
                 }
             });

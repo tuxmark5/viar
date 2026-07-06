@@ -309,6 +309,7 @@ impl ViarApp {
                         &field_label,
                         &self.theme,
                         self.dynamic_data.as_ref().map(|d| &d.aliases),
+                        self.encoding,
                     );
 
                     if let Some(dynamic) = self.dynamic_data.as_mut() {
