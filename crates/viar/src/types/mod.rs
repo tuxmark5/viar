@@ -21,8 +21,10 @@ pub use dynamic::{
     TapDanceField,
 };
 pub use keymap::{
-    KeyChange,
+    EditChange,
+    EditTarget,
     KeymapData,
+    KeymapLayer,
 };
 pub use lighting::LightingData;
 pub use pointing::PointingData;

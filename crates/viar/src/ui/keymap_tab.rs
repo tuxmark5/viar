@@ -6,6 +6,7 @@ use tracing::{
     warn,
 };
 use via_protocol::{
+    EncoderPosition,
     Keycode,
     KeycodeGroup,
     ViaProtocol,
@@ -15,7 +16,8 @@ use crate::{
     theme::Theme,
     types::{
         DynamicEntryData,
-        KeyChange,
+        EditChange,
+        EditTarget,
         KeymapData,
         StatusMessage,
         ViarApp,
@@ -92,7 +94,7 @@ impl ViarApp {
         // --- Layer tabs, keyboard render, and selection handling ---
         // Scoped so the keymap_data borrow is released before the picker
         // (a &mut self method) runs.
-        let (selected_key, selected_key_rect, layer_idx) = {
+        let (selected, selected_rect, layer_idx) = {
             let data = self.keymap_data.as_mut().unwrap();
 
             ui.horizontal(|ui| {
@@ -102,7 +104,7 @@ impl ViarApp {
                     let selected = data.selected_layer == layer;
                     if themed_tab(ui, selected, &label, &self.theme).clicked() {
                         data.selected_layer = layer;
-                        data.selected_key = None;
+                        data.selected = None;
                     }
                 }
             });
@@ -138,27 +140,27 @@ impl ViarApp {
                     td: &td_labels,
                     aliases: aliases_ref,
                 };
-                render_keys(ui, &ctx)
+                render_keyboard(ui, &ctx)
             };
-            let clicked_key = render.clicked_key;
-            let selected_key_rect = render.selected_key_rect;
+            let clicked = render.clicked;
+            let selected_rect = render.selected_rect;
 
             // Toggle selection on click
-            if let Some(idx) = clicked_key {
-                if data.selected_key == Some(idx) {
-                    data.selected_key = None;
+            if let Some(target) = clicked {
+                if data.selected == Some(target) {
+                    data.selected = None;
                 } else {
-                    data.selected_key = Some(idx);
+                    data.selected = Some(target);
                 }
             }
 
             // Close picker on Escape
-            if data.selected_key.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                data.selected_key = None;
+            if data.selected.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                data.selected = None;
             }
 
-            // Close picker on click outside keys and picker
-            if data.selected_key.is_some() && clicked_key.is_none() {
+            // Close picker on click outside slots and picker
+            if data.selected.is_some() && clicked.is_none() {
                 let click_pos = ui.input(|i| {
                     if i.pointer.primary_clicked() {
                         i.pointer.interact_pos()
@@ -173,66 +175,59 @@ impl ViarApp {
                         .memory(|mem| mem.area_rect(picker_id))
                         .is_some_and(|r| r.contains(pos));
                     if !in_picker {
-                        data.selected_key = None;
+                        data.selected = None;
                     }
                 }
             }
 
-            (data.selected_key, selected_key_rect, layer_idx)
+            (data.selected, selected_rect, layer_idx)
         };
 
         // Floating popover picker (runs with keymap_data borrow released)
-        if let (Some(key_idx), Some(key_rect)) = (selected_key, selected_key_rect) {
-            self.render_keycode_picker(ui, key_idx, key_rect, layer_idx, aliases_ref);
+        if let (Some(target), Some(rect)) = (selected, selected_rect) {
+            self.render_keycode_picker(ui, target, rect, layer_idx, aliases_ref);
         }
 
         // Handle deferred keycode application
-        let pending: Option<(usize, u16)> = ui.memory(|mem| {
+        let pending: Option<(EditTarget, u16)> = ui.memory(|mem| {
             let kc: Option<u16> = mem.data.get_temp(egui::Id::new("pending_keycode"));
-            let idx: Option<usize> = mem.data.get_temp(egui::Id::new("pending_key_idx"));
-            match (kc, idx) {
-                (Some(kc), Some(idx)) => Some((idx, kc)),
+            let target: Option<EditTarget> = mem.data.get_temp(egui::Id::new("pending_target"));
+            match (kc, target) {
+                (Some(kc), Some(target)) => Some((target, kc)),
                 _ => None,
             }
         });
 
-        if let Some((key_idx, new_kc)) = pending {
+        if let Some((target, new_kc)) = pending {
             ui.memory_mut(|mem| {
                 mem.data.remove::<u16>(egui::Id::new("pending_keycode"));
-                mem.data.remove::<usize>(egui::Id::new("pending_key_idx"));
+                mem.data
+                    .remove::<EditTarget>(egui::Id::new("pending_target"));
             });
-            self.apply_keycode(key_idx, new_kc);
+            self.apply_edit(target, new_kc);
         }
     }
 
-    /// Render the floating keycode picker popover for the selected key.
+    /// Render the floating keycode picker popover for the selected slot.
     fn render_keycode_picker(
         &mut self,
         ui: &mut egui::Ui,
-        key_idx: usize,
-        key_rect: egui::Rect,
+        target: EditTarget,
+        anchor: egui::Rect,
         layer_idx: usize,
         aliases_ref: Option<&HashMap<String, String>>,
     ) {
-        // Snapshot the key's current keycode / matrix position, then release the
+        // Snapshot the slot's current keycode / header, then release the
         // keymap_data borrow so the picker body can freely touch other self fields.
-        let (raw_kc, row, col, kc_name, kc_category) = {
+        let (raw_kc, header, kc_name, kc_category) = {
             let Some(data) = self.keymap_data.as_ref() else {
                 return;
             };
-            let key_pos = &data.layout.keys[key_idx];
-            let raw_kc = data
-                .keymap
-                .get(layer_idx)
-                .and_then(|l| l.get(key_pos.row as usize))
-                .and_then(|r| r.get(key_pos.col as usize))
-                .copied()
-                .unwrap_or(0);
+            let raw_kc = data.target_keycode(layer_idx, target);
             let keycode = Keycode(raw_kc);
             (
                 raw_kc,
-                key_pos.row,
-                key_pos.col,
+                target_header(layer_idx, target, data),
                 aliased_name(raw_kc, aliases_ref),
                 format!("{:?}", keycode.category()),
             )
@@ -241,7 +236,7 @@ impl ViarApp {
         let popover_w = 480.0_f32;
         let popover_h = 320.0_f32;
         let (pop_x, pop_y) =
-            picker_popover_pos(key_rect, ui.ctx().content_rect(), popover_w, popover_h);
+            picker_popover_pos(anchor, ui.ctx().content_rect(), popover_w, popover_h);
 
         let mut open = true;
         egui::Window::new("Keycode Picker")
@@ -252,9 +247,9 @@ impl ViarApp {
             .collapsible(false)
             .title_bar(false)
             .show(ui.ctx(), |ui| {
-                render_picker_header(ui, layer_idx, row, col, &kc_name, raw_kc, &kc_category);
+                render_picker_header(ui, &header, &kc_name, raw_kc, &kc_category);
                 ui.add_space(4.0);
-                render_hex_input(ui, raw_kc, key_idx);
+                render_hex_input(ui, raw_kc, target);
                 ui.add_space(2.0);
 
                 // Group tabs + My Quantum tab + Builders tab
@@ -285,85 +280,36 @@ impl ViarApp {
                 };
 
                 if let Some(new_kc) = picked_kc {
-                    ui.memory_mut(|mem| {
-                        mem.data
-                            .insert_temp(egui::Id::new("pending_keycode"), new_kc);
-                        mem.data
-                            .insert_temp(egui::Id::new("pending_key_idx"), key_idx);
-                    });
+                    queue_pending_keycode(ui, new_kc, target);
                 }
             });
 
-        // Close popover => deselect key
+        // Close popover => clear selection
         if !open && let Some(data) = &mut self.keymap_data {
-            data.selected_key = None;
+            data.selected = None;
         }
     }
 
-    pub fn apply_keycode(&mut self, key_idx: usize, new_keycode: u16) {
+    /// Apply a keycode to any slot (key, encoder direction, or push), recording
+    /// undo and writing it through to the device.
+    pub fn apply_edit(&mut self, target: EditTarget, new_keycode: u16) {
         let Some(data) = &mut self.keymap_data else {
             return;
         };
-        let key_pos = &data.layout.keys[key_idx];
         let layer = data.selected_layer;
-        let row = key_pos.row;
-        let col = key_pos.col;
-
-        let old_keycode = data
-            .keymap
-            .get(layer)
-            .and_then(|l| l.get(row as usize))
-            .and_then(|r| r.get(col as usize))
-            .copied()
-            .unwrap_or(0);
-
+        let old_keycode = data.target_keycode(layer, target);
         if old_keycode == new_keycode {
             return;
         }
-
-        if let Some(layer_data) = data.keymap.get_mut(layer)
-            && let Some(row_data) = layer_data.get_mut(row as usize)
-            && let Some(cell) = row_data.get_mut(col as usize)
-        {
-            *cell = new_keycode;
-        }
-
-        data.undo_stack.push(KeyChange {
+        data.set_target_keycode(layer, target, new_keycode);
+        data.undo_stack.push(EditChange {
             layer,
-            row,
-            col,
-            key_idx,
-            old_keycode,
-            new_keycode,
+            target,
+            old: old_keycode,
         });
         data.dirty = true;
-
-        if let Some(dev) = &self.connected_device {
-            let proto = ViaProtocol::new(dev);
-            match proto.set_keycode(layer as u8, row, col, new_keycode) {
-                Ok(()) => {
-                    let kc_name = Keycode(new_keycode).name();
-                    info!(
-                        layer,
-                        row,
-                        col,
-                        keycode = kc_name,
-                        "keycode written to device"
-                    );
-                    self.set_status(StatusMessage::info(format!(
-                        "Set [{row},{col}] -> {kc_name}"
-                    )));
-                }
-                Err(e) => {
-                    let err_str = format!("{e}");
-                    warn!(error = %e, "failed to write keycode to device");
-                    self.set_status(StatusMessage::error(format!("Write failed: {e}")));
-                    if is_disconnect_error(&err_str) {
-                        self.handle_disconnect();
-                    }
-                }
-            }
-        }
+        let matrix = data.target_matrix(target);
+        self.write_target(target, layer, matrix, new_keycode, "Set");
     }
 
     pub fn undo(&mut self) {
@@ -373,50 +319,79 @@ impl ViarApp {
         let Some(change) = data.undo_stack.pop() else {
             return;
         };
-
-        if let Some(layer_data) = data.keymap.get_mut(change.layer)
-            && let Some(row_data) = layer_data.get_mut(change.row as usize)
-            && let Some(cell) = row_data.get_mut(change.col as usize)
-        {
-            *cell = change.old_keycode;
-        }
-
+        data.set_target_keycode(change.layer, change.target, change.old);
         if data.undo_stack.is_empty() {
             data.dirty = false;
         }
+        let matrix = data.target_matrix(change.target);
+        self.write_target(change.target, change.layer, matrix, change.old, "Undo");
+    }
 
-        if let Some(dev) = &self.connected_device {
-            let proto = ViaProtocol::new(dev);
-            match proto.set_keycode(
-                change.layer as u8,
-                change.row,
-                change.col,
-                change.old_keycode,
-            ) {
-                Ok(()) => {
-                    let name = Keycode(change.old_keycode).name();
-                    info!(
-                        layer = change.layer,
-                        row = change.row,
-                        col = change.col,
-                        keycode = name,
-                        "undo applied"
-                    );
-                    self.set_status(StatusMessage::info(format!(
-                        "Undo: [{},{}] -> {name}",
-                        change.row, change.col
-                    )));
-                }
-                Err(e) => {
-                    let err_str = format!("{e}");
-                    warn!(error = %e, "undo write failed");
-                    self.set_status(StatusMessage::error(format!("Undo write failed: {e}")));
-                    if is_disconnect_error(&err_str) {
-                        self.handle_disconnect();
-                    }
+    /// Write one keycode to the device for `target`, updating the status line.
+    /// `verb` labels the status message ("Set" / "Undo").
+    fn write_target(
+        &mut self,
+        target: EditTarget,
+        layer: usize,
+        matrix: Option<(u8, u8)>,
+        keycode: u16,
+        verb: &str,
+    ) {
+        let Some(dev) = &self.connected_device else {
+            return;
+        };
+        let proto = ViaProtocol::new(dev);
+        let result = match target {
+            EditTarget::Encoder { index, clockwise } => {
+                proto.set_encoder(layer as u8, index, clockwise, keycode)
+            }
+            EditTarget::Key(_) | EditTarget::Push { .. } => match matrix {
+                Some((row, col)) => proto.set_keycode(layer as u8, row, col, keycode),
+                None => return,
+            },
+        };
+        let desc = target_desc(target, matrix);
+        match result {
+            Ok(()) => {
+                let name = Keycode(keycode).name();
+                info!(?target, layer, keycode = name, "keycode written to device");
+                self.set_status(StatusMessage::info(format!("{verb} {desc} -> {name}")));
+            }
+            Err(e) => {
+                let err_str = format!("{e}");
+                warn!(error = %e, "failed to write keycode to device");
+                self.set_status(StatusMessage::error(format!("{verb} failed: {e}")));
+                if is_disconnect_error(&err_str) {
+                    self.handle_disconnect();
                 }
             }
         }
+    }
+}
+
+/// Picker header line describing the slot being edited.
+fn target_header(layer: usize, target: EditTarget, data: &KeymapData) -> String {
+    match target {
+        EditTarget::Encoder { index, clockwise } => {
+            let dir = if clockwise { "CW ↻" } else { "CCW ↺" };
+            format!("Layer {layer}  Enc {index} {dir}")
+        }
+        _ => match data.target_matrix(target) {
+            Some((row, col)) => format!("Layer {layer}  [{row},{col}]"),
+            None => format!("Layer {layer}"),
+        },
+    }
+}
+
+/// Short slot description for status messages (e.g. `[0,4]` or `Enc0 CW`).
+fn target_desc(target: EditTarget, matrix: Option<(u8, u8)>) -> String {
+    match target {
+        EditTarget::Encoder { index, clockwise } => {
+            format!("Enc{index} {}", if clockwise { "CW" } else { "CCW" })
+        }
+        _ => matrix
+            .map(|(row, col)| format!("[{row},{col}]"))
+            .unwrap_or_default(),
     }
 }
 
@@ -443,22 +418,16 @@ fn picker_popover_pos(
     (pop_x, pop_y)
 }
 
-/// Picker header: layer / matrix position, current keycode name + hex, category.
+/// Picker header: slot description, current keycode name + hex, category.
 fn render_picker_header(
     ui: &mut egui::Ui,
-    layer_idx: usize,
-    row: u8,
-    col: u8,
+    header: &str,
     kc_name: &str,
     raw_kc: u16,
     kc_category: &str,
 ) {
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(format!("Layer {layer_idx} [{row},{col}]"))
-                .strong()
-                .size(17.0),
-        );
+        ui.label(egui::RichText::new(header).strong().size(17.0));
         ui.separator();
         ui.label(
             egui::RichText::new(format!("{kc_name}  {:#06x}", raw_kc))
@@ -475,7 +444,7 @@ fn render_picker_header(
 }
 
 /// Raw-hex keycode entry row. Queues a pending keycode on Enter or the Set button.
-fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, key_idx: usize) {
+fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, target: EditTarget) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Hex:").size(15.0).color(COL_HEX_LABEL));
         let hex_id = egui::Id::new("picker_hex_input");
@@ -493,7 +462,7 @@ fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, key_idx: usize) {
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
             && let Ok(v) = u16::from_str_radix(hex_str.trim(), 16)
         {
-            queue_pending_keycode(ui, v, key_idx);
+            queue_pending_keycode(ui, v, target);
         }
 
         let preview_kc = u16::from_str_radix(hex_str.trim(), 16).unwrap_or(0);
@@ -514,19 +483,19 @@ fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, key_idx: usize) {
             .clicked()
             && let Ok(v) = u16::from_str_radix(hex_str.trim(), 16)
         {
-            queue_pending_keycode(ui, v, key_idx);
+            queue_pending_keycode(ui, v, target);
         }
     });
 }
 
-/// Stash a keycode + key index in egui memory for the main loop to apply after
+/// Stash a keycode + edit target in egui memory for the main loop to apply after
 /// the frame (avoids mutating self from inside the picker closures).
-fn queue_pending_keycode(ui: &egui::Ui, keycode: u16, key_idx: usize) {
+fn queue_pending_keycode(ui: &egui::Ui, keycode: u16, target: EditTarget) {
     ui.memory_mut(|mem| {
         mem.data
             .insert_temp(egui::Id::new("pending_keycode"), keycode);
         mem.data
-            .insert_temp(egui::Id::new("pending_key_idx"), key_idx);
+            .insert_temp(egui::Id::new("pending_target"), target);
     });
 }
 
@@ -868,56 +837,48 @@ struct KeymapRender<'a> {
     aliases:   Option<&'a HashMap<String, String>>,
 }
 
-/// Aggregate outcome of rendering all keycaps for a layer.
-struct KeyRenderResult {
-    /// Index of a key clicked this frame, if any.
-    clicked_key:       Option<usize>,
-    /// Screen rect of the currently selected key, for anchoring the picker.
-    selected_key_rect: Option<egui::Rect>,
-}
-
-/// Interaction outcome for a single keycap.
-struct KeyDrawResult {
-    /// Whether this key was clicked this frame.
-    clicked:       bool,
-    /// This key's screen rect if it is the selected one (for picker anchoring).
+/// Interaction outcome of rendering keys / encoders for a frame.
+#[derive(Default)]
+struct RenderResult {
+    /// The slot clicked this frame, if any.
+    clicked:       Option<EditTarget>,
+    /// Screen rect of the selected slot, for anchoring the picker.
     selected_rect: Option<egui::Rect>,
 }
 
-/// Draw every keycap for the selected layer, aggregating the click and the
-/// selected key's rect.
-fn render_keys(ui: &egui::Ui, ctx: &KeymapRender) -> KeyRenderResult {
-    let mut clicked_key = None;
-    let mut selected_key_rect = None;
+impl RenderResult {
+    /// Fold in a child slot's outcome, letting later hits win (matches draw
+    /// order — the last thing drawn is on top).
+    fn merge(&mut self, other: RenderResult) {
+        if other.clicked.is_some() {
+            self.clicked = other.clicked;
+        }
+        if other.selected_rect.is_some() {
+            self.selected_rect = other.selected_rect;
+        }
+    }
+}
+
+/// Draw the whole keyboard — every keycap and encoder — for the selected layer,
+/// aggregating the click and the selected slot's rect.
+fn render_keyboard(ui: &egui::Ui, ctx: &KeymapRender) -> RenderResult {
+    let mut result = RenderResult::default();
     for key_idx in 0..ctx.data.layout.keys.len() {
-        let res = render_key(ui, ctx, key_idx);
-        if res.clicked {
-            clicked_key = Some(key_idx);
-        }
-        if res.selected_rect.is_some() {
-            selected_key_rect = res.selected_rect;
-        }
+        result.merge(render_key(ui, ctx, key_idx));
     }
-    KeyRenderResult {
-        clicked_key,
-        selected_key_rect,
+    for enc in &ctx.data.layout.encoders {
+        result.merge(render_encoder(ui, ctx, enc));
     }
+    result
 }
 
 /// Draw one keycap: background, labels (split for tap-dance / dual-role keys),
 /// combo indicator dots, and its hover tooltip.
-fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> KeyDrawResult {
+fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult {
     let key_pos = &ctx.data.layout.keys[key_idx];
     let painter = ui.painter();
 
-    let raw_kc = ctx
-        .data
-        .keymap
-        .get(ctx.layer_idx)
-        .and_then(|l| l.get(key_pos.row as usize))
-        .and_then(|r| r.get(key_pos.col as usize))
-        .copied()
-        .unwrap_or(0);
+    let raw_kc = ctx.data.keycode_at(ctx.layer_idx, key_pos.row, key_pos.col);
     let keycode = Keycode(raw_kc);
 
     let px = ctx.origin.x + key_pos.x * ctx.key_size;
@@ -927,7 +888,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> KeyDrawResul
 
     let rect = egui::Rect::from_min_size(egui::pos2(px, py), egui::vec2(pw, ph));
 
-    let is_selected = ctx.data.selected_key == Some(key_idx);
+    let is_selected = ctx.data.selected == Some(EditTarget::Key(key_idx));
     let is_hovered = ui.rect_contains_pointer(rect);
 
     let bg_color = if is_selected {
@@ -1040,8 +1001,8 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> KeyDrawResul
         render_key_tooltip(ui, ctx, key_idx, key_pos.row, key_pos.col, raw_kc, &label);
     }
 
-    KeyDrawResult {
-        clicked,
+    RenderResult {
+        clicked:       clicked.then_some(EditTarget::Key(key_idx)),
         selected_rect: is_selected.then_some(rect),
     }
 }
@@ -1092,4 +1053,240 @@ fn render_key_tooltip(
             );
         }
     });
+}
+
+// ===========================================================================
+// Encoders
+// ===========================================================================
+
+/// Counter-clockwise / clockwise rotation glyphs.
+const GLYPH_CCW: &str = "↺";
+const GLYPH_CW: &str = "↻";
+
+/// How an encoder's rect is subdivided into editable slots. Chosen from whether
+/// the encoder can be pushed and whether its button is square / wide / tall.
+enum EncoderShape {
+    /// Pushable + square: push across the top, CCW / CW across the bottom.
+    SplitQuad,
+    /// Pushable + wide: CCW | push | CW in a row.
+    RowTriple,
+    /// Pushable + tall: CCW / push / CW in a column.
+    ColumnTriple,
+    /// No push + wide/square: CCW | CW side by side.
+    SplitHorizontal,
+    /// No push + tall: CCW / CW stacked.
+    SplitVertical,
+}
+
+/// Pick the split layout for an encoder from its push capability and shape.
+fn encoder_shape(enc: &EncoderPosition) -> EncoderShape {
+    let square = (enc.w - enc.h).abs() < 0.25;
+    let wide = enc.w >= enc.h;
+    match (enc.push.is_some(), square) {
+        (true, true) => EncoderShape::SplitQuad,
+        (true, false) if wide => EncoderShape::RowTriple,
+        (true, false) => EncoderShape::ColumnTriple,
+        (false, _) if wide => EncoderShape::SplitHorizontal,
+        (false, _) => EncoderShape::SplitVertical,
+    }
+}
+
+/// One editable region of an encoder (a rotation direction or the push switch).
+struct EncoderSlot {
+    rect:   egui::Rect,
+    target: EditTarget,
+    /// Direction glyph, or "" for the push slot.
+    glyph:  &'static str,
+}
+
+/// Split a rect into `n` equal columns (left to right).
+fn split_h(rect: egui::Rect, n: usize) -> Vec<egui::Rect> {
+    let w = rect.width() / n as f32;
+    (0..n)
+        .map(|i| {
+            egui::Rect::from_min_size(
+                egui::pos2(rect.min.x + w * i as f32, rect.min.y),
+                egui::vec2(w, rect.height()),
+            )
+        })
+        .collect()
+}
+
+/// Split a rect into `n` equal rows (top to bottom).
+fn split_v(rect: egui::Rect, n: usize) -> Vec<egui::Rect> {
+    let h = rect.height() / n as f32;
+    (0..n)
+        .map(|i| {
+            egui::Rect::from_min_size(
+                egui::pos2(rect.min.x, rect.min.y + h * i as f32),
+                egui::vec2(rect.width(), h),
+            )
+        })
+        .collect()
+}
+
+/// Build the slots for an encoder within `rect`, per its shape.
+fn encoder_slots(enc: &EncoderPosition, rect: egui::Rect) -> Vec<EncoderSlot> {
+    let ccw = EditTarget::Encoder {
+        index:     enc.index,
+        clockwise: false,
+    };
+    let cw = EditTarget::Encoder {
+        index:     enc.index,
+        clockwise: true,
+    };
+    let push = enc.push.map(|(row, col)| EditTarget::Push { row, col });
+    let slot = |rect: egui::Rect, target, glyph| EncoderSlot {
+        rect: rect.shrink(1.0),
+        target,
+        glyph,
+    };
+
+    match encoder_shape(enc) {
+        EncoderShape::SplitQuad => {
+            let top = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.center().y));
+            let bl = egui::Rect::from_min_max(
+                egui::pos2(rect.min.x, rect.center().y),
+                egui::pos2(rect.center().x, rect.max.y),
+            );
+            let br = egui::Rect::from_min_max(rect.center(), rect.max);
+            let mut slots = Vec::new();
+            if let Some(p) = push {
+                slots.push(slot(top, p, ""));
+            }
+            slots.push(slot(bl, ccw, GLYPH_CCW));
+            slots.push(slot(br, cw, GLYPH_CW));
+            slots
+        }
+        EncoderShape::RowTriple => {
+            let cols = split_h(rect, 3);
+            let mut slots = vec![slot(cols[0], ccw, GLYPH_CCW)];
+            if let Some(p) = push {
+                slots.push(slot(cols[1], p, ""));
+            }
+            slots.push(slot(cols[2], cw, GLYPH_CW));
+            slots
+        }
+        EncoderShape::ColumnTriple => {
+            let rows = split_v(rect, 3);
+            let mut slots = vec![slot(rows[0], ccw, GLYPH_CCW)];
+            if let Some(p) = push {
+                slots.push(slot(rows[1], p, ""));
+            }
+            slots.push(slot(rows[2], cw, GLYPH_CW));
+            slots
+        }
+        EncoderShape::SplitHorizontal => {
+            let cols = split_h(rect, 2);
+            vec![slot(cols[0], ccw, GLYPH_CCW), slot(cols[1], cw, GLYPH_CW)]
+        }
+        EncoderShape::SplitVertical => {
+            let rows = split_v(rect, 2);
+            vec![slot(rows[0], ccw, GLYPH_CCW), slot(rows[1], cw, GLYPH_CW)]
+        }
+    }
+}
+
+/// Draw one encoder as its shape-appropriate split of push / CCW / CW slots.
+/// When encoder-map data is absent (unsupported firmware) only the push switch
+/// is shown, so rotation editing stays hidden.
+fn render_encoder(ui: &egui::Ui, ctx: &KeymapRender, enc: &EncoderPosition) -> RenderResult {
+    let px = ctx.origin.x + enc.x * ctx.key_size;
+    let py = ctx.origin.y + enc.y * ctx.key_size;
+    let pw = enc.w * ctx.key_size - ctx.gap;
+    let ph = enc.h * ctx.key_size - ctx.gap;
+    let rect = egui::Rect::from_min_size(egui::pos2(px, py), egui::vec2(pw, ph));
+
+    let rotation_enabled = ctx
+        .data
+        .layers
+        .get(ctx.layer_idx)
+        .is_some_and(|l| !l.encoders.is_empty());
+
+    let slots = if rotation_enabled {
+        encoder_slots(enc, rect)
+    } else if let Some((row, col)) = enc.push {
+        vec![EncoderSlot {
+            rect:   rect.shrink(1.0),
+            target: EditTarget::Push { row, col },
+            glyph:  "",
+        }]
+    } else {
+        Vec::new()
+    };
+
+    let mut result = RenderResult::default();
+    for slot in &slots {
+        result.merge(draw_encoder_slot(ui, ctx, slot));
+    }
+    result
+}
+
+/// Draw a single encoder slot (background, direction glyph, keycode label) and
+/// report its click / selection like a key.
+fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> RenderResult {
+    let painter = ui.painter();
+    let raw_kc = ctx.data.target_keycode(ctx.layer_idx, slot.target);
+    let keycode = Keycode(raw_kc);
+    let is_selected = ctx.data.selected == Some(slot.target);
+    let is_hovered = ui.rect_contains_pointer(slot.rect);
+
+    let bg = if is_selected {
+        COL_SELECTED_BG
+    } else if is_hovered {
+        COL_HOVER_BG
+    } else {
+        keycode.category().bg()
+    };
+    let border = if is_selected {
+        COL_SELECTED_BORDER
+    } else {
+        COL_BORDER
+    };
+    let rounding = egui::CornerRadius::same(3);
+    painter.rect_filled(slot.rect, rounding, bg);
+    painter.rect_stroke(
+        slot.rect,
+        rounding,
+        egui::Stroke::new(1.0_f32, border),
+        egui::StrokeKind::Outside,
+    );
+
+    // Direction glyph in the top-left corner (push slots have none).
+    if !slot.glyph.is_empty() {
+        painter.text(
+            slot.rect.left_top() + egui::vec2(3.0, 1.0),
+            egui::Align2::LEFT_TOP,
+            slot.glyph,
+            egui::FontId::proportional((slot.rect.height() * 0.34).min(14.0)),
+            if is_selected {
+                egui::Color32::WHITE
+            } else {
+                COL_HOLD_LABEL
+            },
+        );
+    }
+
+    let text_color = if is_selected {
+        egui::Color32::WHITE
+    } else if raw_kc == 0 || raw_kc == 1 {
+        COL_TEXT_DIM
+    } else {
+        COL_TEXT
+    };
+    let label = aliased_name(raw_kc, ctx.aliases);
+    let font_size = (slot.rect.height() * 0.3).clamp(7.0, 14.0);
+    painter.text(
+        slot.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        &label,
+        egui::FontId::proportional(font_size),
+        text_color,
+    );
+
+    let clicked = is_hovered && ui.input(|i| i.pointer.primary_clicked());
+    RenderResult {
+        clicked:       clicked.then_some(slot.target),
+        selected_rect: is_selected.then_some(slot.rect),
+    }
 }

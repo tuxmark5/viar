@@ -253,7 +253,7 @@ impl ViarApp {
             "reading keymap from device"
         );
 
-        let keymap = match proto.read_entire_keymap(layer_count, layout.rows, layout.cols) {
+        let matrix = match proto.read_entire_keymap(layer_count, layout.rows, layout.cols) {
             Ok(km) => {
                 info!("keymap loaded successfully");
                 km
@@ -266,13 +266,59 @@ impl ViarApp {
                 ]
             }
         };
+        let mut layers: Vec<KeymapLayer> =
+            matrix.into_iter().map(KeymapLayer::from_matrix).collect();
+
+        // Read encoder rotation keycodes (the encoder-map protocol, addressed by
+        // encoder index + direction, independent of the key matrix). Populate
+        // only if every read succeeds; a firmware without ENCODER_MAP errors out,
+        // in which case we leave encoders empty and rotation editing stays hidden.
+        if !layout.encoders.is_empty() {
+            let encoder_count = layout
+                .encoders
+                .iter()
+                .map(|e| e.index as usize)
+                .max()
+                .unwrap()
+                + 1;
+            let mut per_layer: Vec<Vec<[u16; 2]>> = Vec::with_capacity(layers.len());
+            let mut all_ok = true;
+            'layers: for layer_idx in 0..layers.len() {
+                let mut enc = vec![[0u16; 2]; encoder_count];
+                for e in &layout.encoders {
+                    match (
+                        proto.get_encoder(layer_idx as u8, e.index, false),
+                        proto.get_encoder(layer_idx as u8, e.index, true),
+                    ) {
+                        (Ok(ccw), Ok(cw)) => enc[e.index as usize] = [ccw, cw],
+                        (Err(err), _) | (_, Err(err)) => {
+                            warn!(error = %err, encoder = e.index, layer = layer_idx,
+                                "encoder map unavailable; disabling rotation editing");
+                            all_ok = false;
+                            break 'layers;
+                        }
+                    }
+                }
+                per_layer.push(enc);
+            }
+            if all_ok {
+                for (layer, enc) in layers.iter_mut().zip(per_layer) {
+                    layer.encoders = enc;
+                }
+                info!(
+                    encoders = encoder_count,
+                    layers = layers.len(),
+                    "encoder keycodes loaded"
+                );
+            }
+        }
 
         self.keymap_data = Some(KeymapData {
             layout,
-            keymap,
+            layers,
             layer_count,
             selected_layer: 0,
-            selected_key: None,
+            selected: None,
             dirty: false,
             undo_stack: Vec::new(),
         });

@@ -21,7 +21,10 @@ impl ViarApp {
             match proto.read_entire_keymap(data.layer_count, data.layout.rows, data.layout.cols) {
                 Ok(km) => {
                     info!("keymap reloaded");
-                    data.keymap = km;
+                    // Replace each layer's matrix, keeping already-loaded encoder data.
+                    for (layer, matrix) in data.layers.iter_mut().zip(km) {
+                        layer.matrix = matrix;
+                    }
                     data.dirty = false;
                     data.undo_stack.clear();
                     self.set_status(StatusMessage::info("Keymap reloaded from device"));
@@ -40,9 +43,9 @@ impl ViarApp {
         };
 
         let mut layers = Vec::new();
-        for (layer_idx, layer) in data.keymap.iter().enumerate() {
+        for (layer_idx, layer) in data.layers.iter().enumerate() {
             let mut rows = Vec::new();
-            for (row_idx, row) in layer.iter().enumerate() {
+            for (row_idx, row) in layer.matrix.iter().enumerate() {
                 let keys: Vec<serde_json::Value> = row
                     .iter()
                     .enumerate()
@@ -59,14 +62,29 @@ impl ViarApp {
                     "keys": keys,
                 }));
             }
+            let encoders: Vec<serde_json::Value> = layer
+                .encoders
+                .iter()
+                .enumerate()
+                .map(|(index, &[ccw, cw])| {
+                    serde_json::json!({
+                        "index": index,
+                        "ccw": ccw,
+                        "ccw_name": Keycode(ccw).name(),
+                        "cw": cw,
+                        "cw_name": Keycode(cw).name(),
+                    })
+                })
+                .collect();
             layers.push(serde_json::json!({
                 "layer": layer_idx,
                 "rows": rows,
+                "encoders": encoders,
             }));
         }
 
         let dump = serde_json::json!({
-            "viar_version": 1,
+            "viar_version": 2,
             "layout": data.layout.name,
             "matrix_rows": data.layout.rows,
             "matrix_cols": data.layout.cols,
@@ -143,28 +161,41 @@ impl ViarApp {
             return;
         };
 
-        let mut new_keymap = data.keymap.clone();
+        let mut new_matrix: Vec<Vec<Vec<u16>>> =
+            data.layers.iter().map(|l| l.matrix.clone()).collect();
+        let mut new_encoders: Vec<Vec<[u16; 2]>> =
+            data.layers.iter().map(|l| l.encoders.clone()).collect();
         for layer_obj in layers {
             let layer_idx = layer_obj["layer"].as_u64().unwrap_or(0) as usize;
-            if layer_idx >= new_keymap.len() {
+            if layer_idx >= new_matrix.len() {
                 continue;
             }
-            let Some(rows) = layer_obj["rows"].as_array() else {
-                continue;
-            };
-            for row_obj in rows {
-                let row_idx = row_obj["row"].as_u64().unwrap_or(0) as usize;
-                if row_idx >= new_keymap[layer_idx].len() {
-                    continue;
+            if let Some(rows) = layer_obj["rows"].as_array() {
+                for row_obj in rows {
+                    let row_idx = row_obj["row"].as_u64().unwrap_or(0) as usize;
+                    if row_idx >= new_matrix[layer_idx].len() {
+                        continue;
+                    }
+                    let Some(keys) = row_obj["keys"].as_array() else {
+                        continue;
+                    };
+                    for key_obj in keys {
+                        let col_idx = key_obj["col"].as_u64().unwrap_or(0) as usize;
+                        let raw = key_obj["raw"].as_u64().unwrap_or(0) as u16;
+                        if col_idx < new_matrix[layer_idx][row_idx].len() {
+                            new_matrix[layer_idx][row_idx][col_idx] = raw;
+                        }
+                    }
                 }
-                let Some(keys) = row_obj["keys"].as_array() else {
-                    continue;
-                };
-                for key_obj in keys {
-                    let col_idx = key_obj["col"].as_u64().unwrap_or(0) as usize;
-                    let raw = key_obj["raw"].as_u64().unwrap_or(0) as u16;
-                    if col_idx < new_keymap[layer_idx][row_idx].len() {
-                        new_keymap[layer_idx][row_idx][col_idx] = raw;
+            }
+            // Encoders are optional (absent in v1 files).
+            if let Some(encoders) = layer_obj["encoders"].as_array() {
+                for enc_obj in encoders {
+                    let index = enc_obj["index"].as_u64().unwrap_or(0) as usize;
+                    if index < new_encoders[layer_idx].len() {
+                        let ccw = enc_obj["ccw"].as_u64().unwrap_or(0) as u16;
+                        let cw = enc_obj["cw"].as_u64().unwrap_or(0) as u16;
+                        new_encoders[layer_idx][index] = [ccw, cw];
                     }
                 }
             }
@@ -174,10 +205,10 @@ impl ViarApp {
         let mut errors = 0usize;
         if let Some(dev) = &self.connected_device {
             let proto = ViaProtocol::new(dev);
-            for (layer, layer_keys) in new_keymap.iter().enumerate() {
+            for (layer, layer_keys) in new_matrix.iter().enumerate() {
                 for (row, row_keys) in layer_keys.iter().enumerate() {
                     for (col, &new) in row_keys.iter().enumerate() {
-                        let old = data.keymap[layer][row][col];
+                        let old = data.keycode_at(layer, row as u8, col as u8);
                         if old != new {
                             match proto.set_keycode(layer as u8, row as u8, col as u8, new) {
                                 Ok(()) => changed += 1,
@@ -190,18 +221,43 @@ impl ViarApp {
                     }
                 }
             }
+            for (layer, layer_encs) in new_encoders.iter().enumerate() {
+                for (index, &[ccw, cw]) in layer_encs.iter().enumerate() {
+                    for (clockwise, new) in [(false, ccw), (true, cw)] {
+                        let old = data
+                            .layers
+                            .get(layer)
+                            .map(|l| l.encoder(index as u8, clockwise))
+                            .unwrap_or(0);
+                        if old != new {
+                            match proto.set_encoder(layer as u8, index as u8, clockwise, new) {
+                                Ok(()) => changed += 1,
+                                Err(e) => {
+                                    warn!(error = %e, layer, index, clockwise, "failed to write encoder");
+                                    errors += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        data.keymap = new_keymap;
+        // Write the imported values back into local state.
+        for ((layer, matrix), encoders) in data.layers.iter_mut().zip(new_matrix).zip(new_encoders)
+        {
+            layer.matrix = matrix;
+            layer.encoders = encoders;
+        }
 
         if errors > 0 {
             self.set_status(StatusMessage::error(format!(
-                "Imported with {errors} write errors ({changed} keys updated)"
+                "Imported with {errors} write errors ({changed} slots updated)"
             )));
         } else {
             info!(changed, "keymap imported from {path}");
             self.set_status(StatusMessage::info(format!(
-                "Imported {changed} key changes from {path}"
+                "Imported {changed} changes from {path}"
             )));
         }
     }
