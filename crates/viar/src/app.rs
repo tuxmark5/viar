@@ -28,6 +28,15 @@ use crate::{
     types::*,
 };
 
+/// Whether to send the (cosmetic) VIA uptime query at connect time. Some custom
+/// firmware resets its USB stack on the uptime `get_keyboard_value` sub-value —
+/// which it doesn't implement — instead of returning the "unhandled" sentinel,
+/// dropping the whole connection and leaving the keymap unreadable.
+fn should_probe_uptime(vendor_id: u16, product_id: u16) -> bool {
+    // yukeboard BNK 16: custom VIA firmware re-enumerates on the uptime query.
+    !matches!((vendor_id, product_id), (0x1A86, 0xFE16))
+}
+
 impl ViarApp {
     pub fn new() -> Self {
         let config = load_config();
@@ -197,9 +206,11 @@ impl ViarApp {
             self.firmware_version = Some(fw_ver);
         }
 
-        // Query uptime
-        if let Ok(uptime) = proto.get_uptime() {
-            self.connect_uptime_ms = Some(uptime);
+        // Query uptime (skipped for firmware that resets on it — see helper).
+        if should_probe_uptime(info.vendor_id, info.product_id) {
+            if let Ok(uptime) = proto.get_uptime() {
+                self.connect_uptime_ms = Some(uptime);
+            }
         }
 
         // Detect enabled QMK features by probing
