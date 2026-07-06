@@ -380,11 +380,15 @@ impl ViarApp {
             }
         }
 
-        // Try to load dynamic entries (tap dance, combos, key overrides)
+        // Try to load dynamic entries (tap dance, combos, key overrides). These
+        // are Vial-only features; a VIA-only keyboard replies with garbage to the
+        // Vial command, so only probe them on genuine Vial keyboards.
         self.dynamic_data = None;
         self.pointing_data = None;
         self.qmk_settings_data = None;
-        if let Some(dev) = &self.connected_device {
+        if self.vial_protocol_version.is_some()
+            && let Some(dev) = &self.connected_device
+        {
             let proto = ViaProtocol::new(dev);
             match proto.get_dynamic_entry_counts() {
                 Ok(counts) => {
