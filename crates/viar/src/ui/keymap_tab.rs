@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use via_protocol::{
+    EncoderKey,
     EncoderPosition,
     Keycode,
     KeycodeGroup,
@@ -889,7 +890,29 @@ fn render_keyboard(ui: &egui::Ui, ctx: &KeymapRender) -> RenderResult {
     for enc in &ctx.data.layout.encoders {
         result.merge(render_encoder(ui, ctx, enc));
     }
+    for ek in &ctx.data.layout.encoder_keys {
+        result.merge(render_encoder_key(ui, ctx, ek));
+    }
     result
+}
+
+/// Draw a standard-format encoder direction key (its own position, one rotation
+/// direction), like a keycap with a ↺/↻ glyph.
+fn render_encoder_key(ui: &egui::Ui, ctx: &KeymapRender, ek: &EncoderKey) -> RenderResult {
+    let px = ctx.origin.x + ek.x * ctx.key_size;
+    let py = ctx.origin.y + ek.y * ctx.key_size;
+    let pw = ek.w * ctx.key_size - ctx.gap;
+    let ph = ek.h * ctx.key_size - ctx.gap;
+    let slot = EncoderSlot {
+        rect:     egui::Rect::from_min_size(egui::pos2(px, py), egui::vec2(pw, ph)),
+        target:   EditTarget::Encoder {
+            index:     ek.index,
+            clockwise: ek.clockwise,
+        },
+        glyph:    if ek.clockwise { GLYPH_CW } else { GLYPH_CCW },
+        rounding: egui::CornerRadius::same(4),
+    };
+    draw_encoder_slot(ui, ctx, &slot)
 }
 
 /// Draw one keycap: background, labels (split for tap-dance / dual-role keys),

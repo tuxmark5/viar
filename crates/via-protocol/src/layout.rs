@@ -60,14 +60,14 @@ impl KeyPosition {
     }
 }
 
-/// A rotary encoder's physical placement.
+/// A rotary encoder drawn as one combined widget (the non-standard `eN` legend
+/// format, where the marker carries the index and the leading `row,col` — if
+/// present — is the push switch). The widget is subdivided into CCW/CW/push
+/// slots by the renderer.
 ///
-/// Encoders are marked in the KLE keymap with an `eN` legend line (`N` = encoder
-/// index). Their clockwise / counter-clockwise keycodes are addressed separately
-/// via the encoder-map protocol (`get_encoder`/`set_encoder`), not the matrix.
-/// If the encoder is also a push button its matrix position is in [`push`]; that
-/// switch is a normal keymap entry, so encoders with a push are *not* also
-/// emitted as a [`KeyPosition`].
+/// Clockwise / counter-clockwise keycodes are addressed via the encoder-map
+/// protocol (`get_encoder`/`set_encoder`), not the matrix. A push, when present,
+/// is a normal keymap entry, so it is *not* also emitted as a [`KeyPosition`].
 #[derive(Debug, Clone)]
 pub struct EncoderPosition {
     /// Encoder index used by the encoder-map protocol.
@@ -90,36 +90,65 @@ pub struct EncoderPosition {
     pub push:  Option<(u8, u8)>,
 }
 
+/// A single encoder rotation direction placed as its own key (the standard Vial
+/// format: a bare `e` marker with a leading `index,direction` legend, where
+/// `direction` is 0 = CCW, 1 = CW). Each direction is an independent position.
+#[derive(Debug, Clone)]
+pub struct EncoderKey {
+    /// Encoder index used by the encoder-map protocol.
+    pub index:     u8,
+    /// True for clockwise, false for counter-clockwise.
+    pub clockwise: bool,
+    /// X position in key units (pre-rotated, like [`KeyPosition::x`]).
+    pub x:         f32,
+    /// Y position in key units.
+    pub y:         f32,
+    /// Width in key units.
+    pub w:         f32,
+    /// Height in key units.
+    pub h:         f32,
+    /// Rotation angle in degrees.
+    pub r:         f32,
+    /// Rotation origin X.
+    pub rx:        f32,
+    /// Rotation origin Y.
+    pub ry:        f32,
+}
+
 /// A complete keyboard layout definition.
 #[derive(Debug, Clone)]
 pub struct KeyboardLayout {
     /// Display name.
-    pub name:     String,
+    pub name:         String,
     /// VID:PID pairs this layout applies to (empty = generic).
-    pub vid_pid:  Vec<(u16, u16)>,
+    pub vid_pid:      Vec<(u16, u16)>,
     /// Number of matrix rows.
-    pub rows:     u8,
+    pub rows:         u8,
     /// Number of matrix columns.
-    pub cols:     u8,
+    pub cols:         u8,
     /// Physical key positions.
-    pub keys:     Vec<KeyPosition>,
-    /// Rotary encoders.
-    pub encoders: Vec<EncoderPosition>,
+    pub keys:         Vec<KeyPosition>,
+    /// Combined-widget encoders (`eN` format).
+    pub encoders:     Vec<EncoderPosition>,
+    /// Per-direction encoder keys (standard Vial `index,direction` format).
+    pub encoder_keys: Vec<EncoderKey>,
 }
 
 impl KeyboardLayout {
-    /// Total width in key units, spanning both keys and encoders.
+    /// Total width in key units, spanning keys and all encoder positions.
     pub fn width(&self) -> f32 {
         let keys = self.keys.iter().map(|k| k.x + k.w);
         let encs = self.encoders.iter().map(|e| e.x + e.w);
-        keys.chain(encs).fold(0.0_f32, f32::max)
+        let ekeys = self.encoder_keys.iter().map(|e| e.x + e.w);
+        keys.chain(encs).chain(ekeys).fold(0.0_f32, f32::max)
     }
 
-    /// Total height in key units, spanning both keys and encoders.
+    /// Total height in key units, spanning keys and all encoder positions.
     pub fn height(&self) -> f32 {
         let keys = self.keys.iter().map(|k| k.y + k.h);
         let encs = self.encoders.iter().map(|e| e.y + e.h);
-        keys.chain(encs).fold(0.0_f32, f32::max)
+        let ekeys = self.encoder_keys.iter().map(|e| e.y + e.h);
+        keys.chain(encs).chain(ekeys).fold(0.0_f32, f32::max)
     }
 }
 
@@ -139,6 +168,7 @@ pub fn generic_layout(rows: u8, cols: u8) -> KeyboardLayout {
         cols,
         keys,
         encoders: Vec::new(),
+        encoder_keys: Vec::new(),
     }
 }
 
@@ -186,13 +216,14 @@ pub fn parse_vial_definition(json: &str) -> Result<KeyboardLayout, String> {
         .unwrap_or("Vial Keyboard")
         .to_string();
 
-    let (keys, encoders) = parse_kle_keymap(keymap)?;
+    let (keys, encoders, encoder_keys) = parse_kle_keymap(keymap)?;
 
     debug!(
         name = %name,
         rows, cols,
         num_keys = keys.len(),
         num_encoders = encoders.len(),
+        num_encoder_keys = encoder_keys.len(),
         "parsed Vial definition"
     );
 
@@ -203,13 +234,17 @@ pub fn parse_vial_definition(json: &str) -> Result<KeyboardLayout, String> {
         cols,
         keys,
         encoders,
+        encoder_keys,
     })
 }
 
+type ParsedKeymap = (Vec<KeyPosition>, Vec<EncoderPosition>, Vec<EncoderKey>);
+
 /// Parse KLE-format keymap rows into physical key and encoder positions.
-fn parse_kle_keymap(keymap: &[Value]) -> Result<(Vec<KeyPosition>, Vec<EncoderPosition>), String> {
+fn parse_kle_keymap(keymap: &[Value]) -> Result<ParsedKeymap, String> {
     let mut keys = Vec::new();
     let mut encoders = Vec::new();
+    let mut encoder_keys = Vec::new();
 
     // Current position state
     let mut cur_x: f32;
@@ -298,10 +333,10 @@ fn parse_kle_keymap(keymap: &[Value]) -> Result<(Vec<KeyPosition>, Vec<EncoderPo
 
                     if is_non_default_option {
                         debug!(legend = %legend, x = cur_x, y = cur_y, "skipping non-default layout option");
-                    } else if let Some(marker) = encoder_marker {
-                        let index = marker.unwrap_or(encoders.len() as u8);
+                    } else if let Some(Some(index)) = encoder_marker {
+                        // `eN`: combined-widget encoder; line 0 (if any) is the push.
                         let push = parse_matrix_pos(first_line);
-                        debug!(index, ?push, x, y, "parsed encoder");
+                        debug!(index, ?push, x, y, "parsed combined encoder");
                         encoders.push(EncoderPosition {
                             index,
                             x,
@@ -313,6 +348,24 @@ fn parse_kle_keymap(keymap: &[Value]) -> Result<(Vec<KeyPosition>, Vec<EncoderPo
                             ry: cur_ry,
                             push,
                         });
+                    } else if encoder_marker == Some(None) {
+                        // Bare `e`: standard Vial format, line 0 = "index,direction".
+                        if let Some((index, dir)) = parse_matrix_pos(first_line) {
+                            debug!(index, dir, x, y, "parsed encoder direction key");
+                            encoder_keys.push(EncoderKey {
+                                index,
+                                clockwise: dir != 0,
+                                x,
+                                y,
+                                w: next_w,
+                                h: next_h,
+                                r: cur_r,
+                                rx: cur_rx,
+                                ry: cur_ry,
+                            });
+                        } else {
+                            warn!(legend = %legend, "encoder marker without index,direction");
+                        }
                     } else if let Some((matrix_row, matrix_col)) = parse_matrix_pos(first_line) {
                         let key = KeyPosition::new(x, y, matrix_row, matrix_col)
                             .with_size(next_w, next_h)
@@ -338,7 +391,7 @@ fn parse_kle_keymap(keymap: &[Value]) -> Result<(Vec<KeyPosition>, Vec<EncoderPo
         }
     }
 
-    Ok((keys, encoders))
+    Ok((keys, encoders, encoder_keys))
 }
 
 /// Apply KLE rotation to a top-left position so the renderer can place an
@@ -414,6 +467,33 @@ mod tests {
         let rotation_only = &layout.encoders[1];
         assert_eq!(rotation_only.index, 1);
         assert_eq!(rotation_only.push, None);
+    }
+
+    #[test]
+    fn parses_standard_vial_encoder_direction_keys() {
+        // Standard Vial format (DOIO KB16): bare `e` marker with an
+        // "index,direction" legend — 0 = CCW, 1 = CW. The pushes (0,4)/(1,4) are
+        // plain matrix keys.
+        let json = r#"{
+            "name": "KB16",
+            "matrix": {"rows": 4, "cols": 5},
+            "layouts": {"keymap": [
+                ["0,0\n\n\n\n\n\n\n\n\ne", "0,1\n\n\n\n\n\n\n\n\ne", "0,4", "1,4"]
+            ]}
+        }"#;
+
+        let layout = parse_vial_definition(json).expect("should parse");
+
+        // Bare-`e` encoders become per-direction keys, not combined widgets.
+        assert!(layout.encoders.is_empty());
+        assert_eq!(layout.encoder_keys.len(), 2);
+        assert_eq!(layout.encoder_keys[0].index, 0);
+        assert!(!layout.encoder_keys[0].clockwise); // "0,0" -> dir 0 = CCW
+        assert_eq!(layout.encoder_keys[1].index, 0);
+        assert!(layout.encoder_keys[1].clockwise); // "0,1" -> dir 1 = CW
+
+        // The pushes remain plain matrix keys.
+        assert_eq!(layout.keys.len(), 2);
     }
 
     #[test]

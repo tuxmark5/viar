@@ -588,6 +588,27 @@ impl ViaCommand {
         )
     }
 
+    /// Vial: get an encoder's keycodes for a layer.
+    /// Response: [ccw(u16 BE), cw(u16 BE), ...].
+    pub fn vial_get_encoder(layer: u8, index: u8) -> Self {
+        Self::with_data(ViaCommandId::VialPrefix, &[0x03, layer, index])
+    }
+
+    /// Vial: set one encoder direction's keycode for a layer.
+    pub fn vial_set_encoder(layer: u8, index: u8, clockwise: bool, keycode: u16) -> Self {
+        Self::with_data(
+            ViaCommandId::VialPrefix,
+            &[
+                0x04,
+                layer,
+                index,
+                clockwise as u8,
+                (keycode >> 8) as u8,
+                (keycode & 0xFF) as u8,
+            ],
+        )
+    }
+
     /// Vial: get dynamic entry counts (tap dance, combos, key overrides, alt repeat keys).
     /// Response: [td_count, combo_count, ko_count, arep_count, ..., feature_flags]
     pub fn vial_get_dynamic_entry_count() -> Self {

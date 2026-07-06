@@ -96,7 +96,12 @@ impl ViarApp {
         let proto = ViaProtocol::new(dev);
         let result = match target {
             EditTarget::Encoder { index, clockwise } => {
-                proto.set_encoder(layer as u8, index, clockwise, keycode)
+                // Vial keyboards use the Vial encoder command; VIA-only use VIA's.
+                if self.vial_protocol_version.is_some() {
+                    proto.vial_set_encoder(layer as u8, index, clockwise, keycode)
+                } else {
+                    proto.set_encoder(layer as u8, index, clockwise, keycode)
+                }
             }
             EditTarget::Key(_) | EditTarget::Push { .. } => match matrix {
                 Some((row, col)) => proto.set_keycode(layer as u8, row, col, keycode),

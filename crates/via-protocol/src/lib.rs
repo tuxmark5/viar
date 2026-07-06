@@ -47,6 +47,7 @@ pub use keycodes::{
     quantum_keycode_defaults,
 };
 pub use layout::{
+    EncoderKey,
     EncoderPosition,
     KeyPosition,
     KeyboardLayout,

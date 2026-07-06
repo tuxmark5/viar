@@ -409,6 +409,34 @@ impl<'a> ViaProtocol<'a> {
         Ok(())
     }
 
+    /// Get an encoder's `(ccw, cw)` keycodes via the Vial encoder protocol.
+    ///
+    /// Vial keyboards implement their own encoder command (VialPrefix subcommand
+    /// 0x03) rather than VIA's `DynamicKeymapGetEncoder`, and return both
+    /// directions at once (CCW then CW, big-endian).
+    pub fn vial_get_encoder(&self, layer: u8, index: u8) -> ViaResult<(u16, u16)> {
+        let resp = self
+            .device
+            .send_command(&ViaCommand::vial_get_encoder(layer, index))?;
+        let ccw = u16::from_be_bytes([resp[0], resp[1]]);
+        let cw = u16::from_be_bytes([resp[2], resp[3]]);
+        Ok((ccw, cw))
+    }
+
+    /// Set one encoder direction's keycode via the Vial encoder protocol.
+    pub fn vial_set_encoder(
+        &self,
+        layer: u8,
+        index: u8,
+        clockwise: bool,
+        keycode: u16,
+    ) -> ViaResult<()> {
+        self.device.send_command(&ViaCommand::vial_set_encoder(
+            layer, index, clockwise, keycode,
+        ))?;
+        Ok(())
+    }
+
     /// Query available QMK settings from the keyboard.
     /// Returns a list of setting IDs available on this keyboard.
     /// The firmware returns IDs greater than the provided cursor value,

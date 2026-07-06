@@ -272,29 +272,45 @@ impl ViarApp {
             matrix.into_iter().map(KeymapLayer::from_matrix).collect();
 
         // Read encoder rotation keycodes (the encoder-map protocol, addressed by
-        // encoder index + direction, independent of the key matrix). Populate
-        // only if every read succeeds; a firmware without ENCODER_MAP errors out,
-        // in which case we leave encoders empty and rotation editing stays hidden.
-        if !layout.encoders.is_empty() {
-            let encoder_count = layout
-                .encoders
-                .iter()
-                .map(|e| e.index as usize)
-                .max()
-                .unwrap()
-                + 1;
+        // encoder index + direction, independent of the key matrix). Encoders
+        // come from both the combined-widget (`eN`) and per-direction (standard
+        // Vial) layouts. Populate only if every read succeeds; a firmware without
+        // ENCODER_MAP errors out, and rotation editing then stays hidden.
+        let mut encoder_indices: Vec<u8> = layout
+            .encoders
+            .iter()
+            .map(|e| e.index)
+            .chain(layout.encoder_keys.iter().map(|k| k.index))
+            .collect();
+        encoder_indices.sort_unstable();
+        encoder_indices.dedup();
+        if let Some(&max_index) = encoder_indices.iter().max() {
+            // Vial keyboards use the Vial encoder command (both directions at
+            // once); VIA-only keyboards use VIA's per-direction command.
+            let is_vial = self.vial_protocol_version.is_some();
+            let encoder_count = max_index as usize + 1;
             let mut per_layer: Vec<Vec<[u16; 2]>> = Vec::with_capacity(layers.len());
             let mut all_ok = true;
             'layers: for layer_idx in 0..layers.len() {
                 let mut enc = vec![[0u16; 2]; encoder_count];
-                for e in &layout.encoders {
-                    match (
-                        proto.get_encoder(layer_idx as u8, e.index, false),
-                        proto.get_encoder(layer_idx as u8, e.index, true),
-                    ) {
-                        (Ok(ccw), Ok(cw)) => enc[e.index as usize] = [ccw, cw],
-                        (Err(err), _) | (_, Err(err)) => {
-                            warn!(error = %err, encoder = e.index, layer = layer_idx,
+                for &index in &encoder_indices {
+                    let pair = if is_vial {
+                        proto
+                            .vial_get_encoder(layer_idx as u8, index)
+                            .map(|(ccw, cw)| [ccw, cw])
+                    } else {
+                        proto
+                            .get_encoder(layer_idx as u8, index, false)
+                            .and_then(|ccw| {
+                                proto
+                                    .get_encoder(layer_idx as u8, index, true)
+                                    .map(|cw| [ccw, cw])
+                            })
+                    };
+                    match pair {
+                        Ok(codes) => enc[index as usize] = codes,
+                        Err(err) => {
+                            warn!(error = %err, encoder = index, layer = layer_idx,
                                 "encoder map unavailable; disabling rotation editing");
                             all_ok = false;
                             break 'layers;
