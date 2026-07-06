@@ -14,7 +14,6 @@ use crate::{
         DynamicEntryData,
         EditTarget,
         FlashKind,
-        KeyFlash,
         KeymapData,
         ViarApp,
     },
@@ -69,20 +68,6 @@ const COL_FAV_BORDER: egui::Color32 = egui::Color32::from_rgb(70, 100, 140);
 /// Hold/sub label on a split favorite cell.
 const COL_FAV_HOLD_LABEL: egui::Color32 = egui::Color32::from_rgb(150, 180, 220);
 
-/// Pulse color for a "copied" flash.
-const COL_FLASH_COPY: egui::Color32 = egui::Color32::from_rgb(120, 200, 255);
-/// Pulse color for a "pasted" flash.
-const COL_FLASH_PASTE: egui::Color32 = egui::Color32::from_rgb(130, 230, 150);
-/// How long the copy/paste pulse animation lasts, in seconds.
-const FLASH_DURATION: f64 = 0.45;
-
-fn flash_color(kind: FlashKind) -> egui::Color32 {
-    match kind {
-        FlashKind::Copy => COL_FLASH_COPY,
-        FlashKind::Paste => COL_FLASH_PASTE,
-    }
-}
-
 impl ViarApp {
     pub fn render_keymap_tab(&mut self, ui: &mut egui::Ui) {
         // Clone aliases up front so the picker can borrow them without holding
@@ -103,35 +88,18 @@ impl ViarApp {
         // Copy/paste pulse for this frame: (slot, 0..1 progress, color). Keep the
         // frame repainting while it plays out.
         let now = ui.input(|i| i.time);
-        let flash = self.flash.and_then(|f| {
-            let progress = ((now - f.start) / FLASH_DURATION) as f32;
-            (progress < 1.0).then(|| (f.target, progress, flash_color(f.kind)))
-        });
-        if flash.is_some() {
+        let flash = self.key_flash.active(now);
+        let layer_flash = self.layer_flash.active(now);
+        if flash.is_some() || layer_flash.is_some() {
             ui.ctx().request_repaint();
         }
 
         // Render the layer bar and keyboard. Scoped so the keymap_data borrow is
         // released before the &mut self event handling / picker below.
-        let (render, layer_idx) = {
+        let (render, layer_idx, copy_layer, paste_layer) = {
             let data = self.keymap_data.as_mut().unwrap();
 
-            let layer_bar = ui.horizontal(|ui| {
-                ui.add_space(8.0);
-                // A single "Layer" label, then just the numbers as tabs (there can
-                // be many layers, so repeating "Layer N" gets noisy).
-                ui.label(egui::RichText::new("Layer").color(self.theme.text_secondary()));
-                for layer in 0..data.layer_count as usize {
-                    let label = format!("{layer}");
-                    let selected = data.selected_layer == layer;
-                    if themed_tab(ui, selected, &label, &self.theme).clicked() {
-                        data.selected_layer = layer;
-                        data.selected = None;
-                    }
-                }
-            });
-
-            handle_layer_scroll(ui, layer_bar.response.rect, data);
+            let (copy_layer, paste_layer) = render_layer_bar(ui, data, &self.theme, layer_flash);
 
             ui.separator();
 
@@ -167,8 +135,25 @@ impl ViarApp {
                 };
                 render_keyboard(ui, &ctx)
             };
-            (render, layer_idx)
+            (render, layer_idx, copy_layer, paste_layer)
         };
+
+        // Layer-level copy / paste (shift + right/left-click on a layer tab),
+        // pulsing the affected tab.
+        if let Some(layer) = copy_layer {
+            self.copy_layer(layer);
+            self.layer_flash.trigger(layer, now, FlashKind::Copy);
+            ui.ctx().request_repaint();
+        }
+        if let Some(layer) = paste_layer {
+            let pasted = self.copied_layer.is_some();
+            self.paste_layer(layer);
+            if pasted {
+                self.layer_flash.trigger(layer, now, FlashKind::Paste);
+                ui.ctx().request_repaint();
+            }
+        }
+        self.layer_flash.clear_if_finished(now);
 
         // Apply this frame's key interactions (select / escape / copy / paste).
         self.handle_keymap_events(ui, &render, layer_idx, now);
@@ -263,29 +248,18 @@ impl ViarApp {
         // Copy / paste (shift + right/left click), pulsing the affected slot.
         if let Some(target) = render.copy {
             self.copy_slot(target);
-            self.flash = Some(KeyFlash {
-                target,
-                start: now,
-                kind: FlashKind::Copy,
-            });
+            self.key_flash.trigger(target, now, FlashKind::Copy);
             ui.ctx().request_repaint();
         }
         if let Some(target) = render.paste {
             let pasted = self.copied_keycode.is_some();
             self.paste_slot(target);
             if pasted {
-                self.flash = Some(KeyFlash {
-                    target,
-                    start: now,
-                    kind: FlashKind::Paste,
-                });
+                self.key_flash.trigger(target, now, FlashKind::Paste);
                 ui.ctx().request_repaint();
             }
         }
-        // Drop a finished flash so it doesn't linger in state.
-        if self.flash.is_some_and(|f| now - f.start >= FLASH_DURATION) {
-            self.flash = None;
-        }
+        self.key_flash.clear_if_finished(now);
     }
 
     /// Render the floating keycode picker popover for the selected slot.
@@ -809,6 +783,57 @@ fn build_td_labels(dynamic: Option<&DynamicEntryData>) -> TdLabels {
     TdLabels { summaries, keycaps }
 }
 
+/// Render the layer bar (a "Layer" label + one tab per layer) and handle its
+/// interactions: left-click selects, wheel-scroll cycles, and shift +
+/// right/left-click copies / pastes a layer. Returns `(copy, paste)` layer
+/// intents for the caller to apply (they need device I/O / `&mut self`).
+fn render_layer_bar(
+    ui: &mut egui::Ui,
+    data: &mut KeymapData,
+    theme: &Theme,
+    flash: Option<(usize, f32, egui::Color32)>,
+) -> (Option<usize>, Option<usize>) {
+    let bar = ui.horizontal(|ui| {
+        let mut copy_layer = None;
+        let mut paste_layer = None;
+        ui.add_space(8.0);
+        // A single "Layer" label, then just the numbers as tabs (there can be
+        // many layers, so repeating "Layer N" gets noisy).
+        ui.label(egui::RichText::new("Layer").color(theme.text_secondary()));
+        let shift = ui.input(|i| i.modifiers.shift);
+        for layer in 0..data.layer_count as usize {
+            let label = format!("{layer}");
+            let selected = data.selected_layer == layer;
+            let resp = themed_tab(ui, selected, &label, theme);
+            if let Some((flash_layer, progress, color)) = flash
+                && flash_layer == layer
+            {
+                draw_flash_ring(
+                    ui.painter(),
+                    resp.rect,
+                    egui::CornerRadius::same(3),
+                    progress,
+                    color,
+                );
+            }
+            if resp.clicked() {
+                if shift {
+                    paste_layer = Some(layer);
+                } else {
+                    data.selected_layer = layer;
+                    data.selected = None;
+                }
+            } else if shift && resp.secondary_clicked() {
+                copy_layer = Some(layer);
+            }
+        }
+        (copy_layer, paste_layer)
+    });
+
+    handle_layer_scroll(ui, bar.response.rect, data);
+    bar.inner
+}
+
 /// Cycle the selected layer when the wheel is scrolled over `bar_rect` (wraps
 /// around). Uses this frame's discrete `MouseWheel` events rather than the
 /// smoothed scroll delta, so one wheel notch advances exactly one layer.
@@ -908,21 +933,15 @@ fn slot_click(ui: &egui::Ui, is_hovered: bool, target: EditTarget) -> RenderResu
     }
 }
 
-/// Draw the copy/paste pulse on `rect` if `target` is the currently flashing
-/// slot: a ring that fades out and expands outward over the flash duration.
-fn draw_slot_flash(
+/// Draw a copy/paste pulse ring around `rect`: it expands outward and fades over
+/// `progress` (0..1).
+fn draw_flash_ring(
     painter: &egui::Painter,
-    ctx: &KeymapRender,
     rect: egui::Rect,
     rounding: egui::CornerRadius,
-    target: EditTarget,
+    progress: f32,
+    color: egui::Color32,
 ) {
-    let Some((flash_target, progress, color)) = ctx.flash else {
-        return;
-    };
-    if flash_target != target {
-        return;
-    }
     let flash_rect = rect.expand(progress * 4.0);
     painter.rect_stroke(
         flash_rect,
@@ -930,6 +949,21 @@ fn draw_slot_flash(
         egui::Stroke::new(2.0_f32, color.gamma_multiply(1.0 - progress)),
         egui::StrokeKind::Outside,
     );
+}
+
+/// Draw the pulse on `rect` if `target` is the currently flashing slot.
+fn draw_slot_flash(
+    painter: &egui::Painter,
+    ctx: &KeymapRender,
+    rect: egui::Rect,
+    rounding: egui::CornerRadius,
+    target: EditTarget,
+) {
+    if let Some((flash_target, progress, color)) = ctx.flash
+        && flash_target == target
+    {
+        draw_flash_ring(painter, rect, rounding, progress, color);
+    }
 }
 
 /// Draw the whole keyboard — every keycap and encoder — for the selected layer,

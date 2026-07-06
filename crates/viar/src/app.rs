@@ -58,7 +58,9 @@ impl ViarApp {
             detected_features: Vec::new(),
             quantum_favorites: Vec::new(),
             copied_keycode: None,
-            flash: None,
+            copied_layer: None,
+            key_flash: KeyFlash::default(),
+            layer_flash: LayerFlash::default(),
         }
     }
 
@@ -346,7 +348,7 @@ impl ViarApp {
             selected_layer: 0,
             selected: None,
             dirty: false,
-            undo_stack: Vec::new(),
+            undo: UndoHistory::default(),
         });
 
         // Try to detect and load lighting

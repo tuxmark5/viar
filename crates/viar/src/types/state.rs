@@ -13,6 +13,8 @@ use super::{
     DynamicEntryData,
     KeyFlash,
     KeymapData,
+    KeymapLayer,
+    LayerFlash,
     LightingData,
     PointingData,
     QmkSettingsData,
@@ -79,6 +81,10 @@ pub struct ViarApp {
     pub quantum_favorites: Vec<u16>,
     /// Keycode copied from a slot (shift+right-click) for pasting (shift+left-click)
     pub copied_keycode: Option<u16>,
-    /// Active copy/paste flash animation on a slot, if any.
-    pub flash: Option<KeyFlash>,
+    /// A whole layer copied (shift+right-click a layer tab) for pasting into another.
+    pub copied_layer: Option<KeymapLayer>,
+    /// Copy/paste flash animation on a key slot (idle when its `start` is None).
+    pub key_flash: KeyFlash,
+    /// Copy/paste flash animation on a layer tab (idle when its `start` is None).
+    pub layer_flash: LayerFlash,
 }

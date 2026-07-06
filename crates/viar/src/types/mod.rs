@@ -27,6 +27,8 @@ pub use keymap::{
     KeyFlash,
     KeymapData,
     KeymapLayer,
+    LayerFlash,
+    UndoHistory,
 };
 pub use lighting::LightingData;
 pub use pointing::PointingData;

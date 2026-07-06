@@ -1,3 +1,4 @@
+use eframe::egui;
 use via_protocol::KeyboardLayout;
 
 /// What a keycode edit applies to.
@@ -11,6 +12,13 @@ pub enum EditTarget {
     Push { row: u8, col: u8 },
 }
 
+impl Default for EditTarget {
+    /// A placeholder used only for an idle [`Flash`]; never a real edit.
+    fn default() -> Self {
+        Self::Key(0)
+    }
+}
+
 /// A single keycode change for undo tracking (holds the value to restore).
 #[derive(Clone, Copy)]
 pub struct EditChange {
@@ -19,22 +27,110 @@ pub struct EditChange {
     pub old:    u16,
 }
 
-/// Which copy/paste action triggered a slot's flash animation.
-#[derive(Clone, Copy)]
+/// Undo history, grouped by action. A single-slot edit is a group of one; a
+/// layer paste is one group covering all of its changed slots, so a single undo
+/// reverts the whole paste.
+#[derive(Default)]
+pub struct UndoHistory {
+    /// All recorded changes, oldest first, concatenated across groups.
+    changes:     Vec<EditChange>,
+    /// The size of each recorded group, in the order they were applied.
+    group_sizes: Vec<usize>,
+}
+
+impl UndoHistory {
+    /// Whether there is anything to undo.
+    pub fn is_empty(&self) -> bool {
+        self.group_sizes.is_empty()
+    }
+
+    /// Forget all history (e.g. after a reload).
+    pub fn clear(&mut self) {
+        self.changes.clear();
+        self.group_sizes.clear();
+    }
+
+    /// Record `changes` as one undoable action. Empty groups are ignored so an
+    /// action that changed nothing leaves no undo entry.
+    pub fn record(&mut self, changes: &[EditChange]) {
+        if !changes.is_empty() {
+            self.group_sizes.push(changes.len());
+            self.changes.extend_from_slice(changes);
+        }
+    }
+
+    /// Remove the most recent action's changes, returned in reverse (restore)
+    /// order. Empty when there is nothing to undo.
+    pub fn pop_group(&mut self) -> Vec<EditChange> {
+        let Some(n) = self.group_sizes.pop() else {
+            return Vec::new();
+        };
+        let mut group = self.changes.split_off(self.changes.len() - n);
+        group.reverse();
+        group
+    }
+}
+
+/// How long a copy/paste pulse animation lasts, in seconds.
+pub const FLASH_DURATION: f64 = 0.45;
+
+/// Which copy/paste action triggered a flash animation.
+#[derive(Clone, Copy, Default)]
 pub enum FlashKind {
+    #[default]
     Copy,
     Paste,
 }
 
-/// A transient highlight on a slot after a copy/paste, animated out over a short
-/// duration.
-#[derive(Clone, Copy)]
-pub struct KeyFlash {
-    pub target: EditTarget,
-    /// egui time (seconds) when the flash started.
-    pub start:  f64,
-    pub kind:   FlashKind,
+impl FlashKind {
+    /// The pulse color for this flash kind.
+    pub fn color(self) -> egui::Color32 {
+        match self {
+            Self::Copy => egui::Color32::from_rgb(120, 200, 255),
+            Self::Paste => egui::Color32::from_rgb(130, 230, 150),
+        }
+    }
 }
+
+/// A transient highlight after a copy/paste, animated out over [`FLASH_DURATION`].
+/// `T` is what is flashing — an [`EditTarget`] for a key slot ([`KeyFlash`]) or a
+/// layer index ([`LayerFlash`]). Always present; `start` is `None` when idle.
+#[derive(Clone, Copy, Default)]
+pub struct Flash<T> {
+    pub subject: T,
+    /// egui time (seconds) when the flash started, or None when idle.
+    pub start:   Option<f64>,
+    pub kind:    FlashKind,
+}
+
+impl<T: Copy> Flash<T> {
+    /// Begin a pulse on `subject` at time `now`.
+    pub fn trigger(&mut self, subject: T, now: f64, kind: FlashKind) {
+        self.subject = subject;
+        self.start = Some(now);
+        self.kind = kind;
+    }
+
+    /// Stop the pulse once its animation has run its course.
+    pub fn clear_if_finished(&mut self, now: f64) {
+        if self.start.is_some_and(|s| now - s >= FLASH_DURATION) {
+            self.start = None;
+        }
+    }
+
+    /// The active pulse as `(subject, progress 0..1, color)`, or None when idle
+    /// or finished.
+    pub fn active(&self, now: f64) -> Option<(T, f32, egui::Color32)> {
+        let start = self.start?;
+        let progress = ((now - start) / FLASH_DURATION) as f32;
+        (progress < 1.0).then(|| (self.subject, progress, self.kind.color()))
+    }
+}
+
+/// A copy/paste flash on a key slot.
+pub type KeyFlash = Flash<EditTarget>;
+/// A copy/paste flash on a layer tab.
+pub type LayerFlash = Flash<usize>;
 
 /// The keycodes for one layer: the key matrix plus per-encoder rotation codes.
 #[derive(Clone, Default)]
@@ -102,8 +198,8 @@ pub struct KeymapData {
     pub selected:       Option<EditTarget>,
     /// Whether keymap has unsaved changes
     pub dirty:          bool,
-    /// Undo history
-    pub undo_stack:     Vec<EditChange>,
+    /// Undo history, grouped by action.
+    pub undo:           UndoHistory,
 }
 
 impl KeymapData {

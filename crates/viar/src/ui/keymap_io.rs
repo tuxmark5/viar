@@ -26,7 +26,7 @@ impl ViarApp {
                         layer.matrix = matrix;
                     }
                     data.dirty = false;
-                    data.undo_stack.clear();
+                    data.undo.clear();
                     self.set_status(StatusMessage::info("Keymap reloaded from device"));
                 }
                 Err(e) => {
