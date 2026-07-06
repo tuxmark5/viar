@@ -111,10 +111,9 @@ impl ViarApp {
             ui.ctx().request_repaint();
         }
 
-        // --- Layer tabs, keyboard render, and selection handling ---
-        // Scoped so the keymap_data borrow is released before the picker
-        // (a &mut self method) runs.
-        let (selected, selected_rect, layer_idx, copy, paste) = {
+        // Render the layer bar and keyboard. Scoped so the keymap_data borrow is
+        // released before the &mut self event handling / picker below.
+        let (render, layer_idx) = {
             let data = self.keymap_data.as_mut().unwrap();
 
             let layer_bar = ui.horizontal(|ui| {
@@ -168,90 +167,15 @@ impl ViarApp {
                 };
                 render_keyboard(ui, &ctx)
             };
-            let clicked = render.clicked;
-            let selected_rect = render.selected_rect;
-            let copy = render.copy;
-            let paste = render.paste;
-
-            // Toggle selection on click
-            if let Some(target) = clicked {
-                if data.selected == Some(target) {
-                    data.selected = None;
-                } else {
-                    data.selected = Some(target);
-                    // Open the picker on the tab that holds this slot's current
-                    // keycode (e.g. F5 opens the "F-Keys" group).
-                    let kc = data.target_keycode(layer_idx, target);
-                    if let Some(group) = self
-                        .picker_groups
-                        .iter()
-                        .position(|g| g.codes.iter().any(|c| c.0 == kc))
-                    {
-                        self.picker_selected_group = group;
-                    }
-                }
-            }
-
-            // Close picker on Escape
-            if data.selected.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                data.selected = None;
-            }
-
-            // Close picker on click outside slots and picker (a shift+left paste
-            // lands on a slot, not "outside", so it shouldn't close the picker).
-            if data.selected.is_some() && clicked.is_none() && paste.is_none() {
-                let click_pos = ui.input(|i| {
-                    if i.pointer.primary_clicked() {
-                        i.pointer.interact_pos()
-                    } else {
-                        None
-                    }
-                });
-                if let Some(pos) = click_pos {
-                    let picker_id = egui::Id::new("kc_picker");
-                    let in_picker = ui
-                        .ctx()
-                        .memory(|mem| mem.area_rect(picker_id))
-                        .is_some_and(|r| r.contains(pos));
-                    if !in_picker {
-                        data.selected = None;
-                    }
-                }
-            }
-
-            (data.selected, selected_rect, layer_idx, copy, paste)
+            (render, layer_idx)
         };
 
-        // Copy / paste a slot's keycode (shift + right/left click), pulsing the
-        // affected slot.
-        if let Some(target) = copy {
-            self.copy_slot(target);
-            self.flash = Some(KeyFlash {
-                target,
-                start: now,
-                kind: FlashKind::Copy,
-            });
-            ui.ctx().request_repaint();
-        }
-        if let Some(target) = paste {
-            let pasted = self.copied_keycode.is_some();
-            self.paste_slot(target);
-            if pasted {
-                self.flash = Some(KeyFlash {
-                    target,
-                    start: now,
-                    kind: FlashKind::Paste,
-                });
-                ui.ctx().request_repaint();
-            }
-        }
-        // Drop a finished flash so it doesn't linger in state.
-        if self.flash.is_some_and(|f| now - f.start >= FLASH_DURATION) {
-            self.flash = None;
-        }
+        // Apply this frame's key interactions (select / escape / copy / paste).
+        self.handle_keymap_events(ui, &render, layer_idx, now);
 
         // Floating popover picker (runs with keymap_data borrow released)
-        if let (Some(target), Some(rect)) = (selected, selected_rect) {
+        let selected = self.keymap_data.as_ref().and_then(|d| d.selected);
+        if let (Some(target), Some(rect)) = (selected, render.selected_rect) {
             self.render_keycode_picker(ui, target, rect, layer_idx, aliases_ref);
         }
 
@@ -272,6 +196,95 @@ impl ViarApp {
                     .remove::<EditTarget>(egui::Id::new("pending_target"));
             });
             self.apply_edit(target, new_kc);
+        }
+    }
+
+    /// Apply this frame's keymap interactions from the render outcome:
+    /// - left-click selects / deselects a slot, opening the picker on the group that holds its
+    ///   current keycode;
+    /// - Escape or a click outside the slots and picker closes it;
+    /// - shift + right/left-click copies / pastes a keycode, pulsing the slot.
+    fn handle_keymap_events(
+        &mut self,
+        ui: &egui::Ui,
+        render: &RenderResult,
+        layer_idx: usize,
+        now: f64,
+    ) {
+        // Selection changes touch keymap_data + the picker's active tab.
+        if let Some(data) = self.keymap_data.as_mut() {
+            // Toggle selection on click.
+            if let Some(target) = render.clicked {
+                if data.selected == Some(target) {
+                    data.selected = None;
+                } else {
+                    data.selected = Some(target);
+                    // Open on the tab that holds this slot's current keycode
+                    // (e.g. F5 opens the "F-Keys" group).
+                    let kc = data.target_keycode(layer_idx, target);
+                    if let Some(group) = self
+                        .picker_groups
+                        .iter()
+                        .position(|g| g.codes.iter().any(|c| c.0 == kc))
+                    {
+                        self.picker_selected_group = group;
+                    }
+                }
+            }
+
+            // Close on Escape.
+            if data.selected.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                data.selected = None;
+            }
+
+            // Close on a click outside the slots and the picker (a shift+left
+            // paste lands on a slot, not "outside", so it shouldn't close it).
+            if data.selected.is_some() && render.clicked.is_none() && render.paste.is_none() {
+                let click_pos = ui.input(|i| {
+                    if i.pointer.primary_clicked() {
+                        i.pointer.interact_pos()
+                    } else {
+                        None
+                    }
+                });
+                if let Some(pos) = click_pos {
+                    let picker_id = egui::Id::new("kc_picker");
+                    let in_picker = ui
+                        .ctx()
+                        .memory(|mem| mem.area_rect(picker_id))
+                        .is_some_and(|r| r.contains(pos));
+                    if !in_picker {
+                        data.selected = None;
+                    }
+                }
+            }
+        }
+
+        // Copy / paste (shift + right/left click), pulsing the affected slot.
+        if let Some(target) = render.copy {
+            self.copy_slot(target);
+            self.flash = Some(KeyFlash {
+                target,
+                start: now,
+                kind: FlashKind::Copy,
+            });
+            ui.ctx().request_repaint();
+        }
+        if let Some(target) = render.paste {
+            let pasted = self.copied_keycode.is_some();
+            self.paste_slot(target);
+            if pasted {
+                self.flash = Some(KeyFlash {
+                    target,
+                    start: now,
+                    kind: FlashKind::Paste,
+                });
+                ui.ctx().request_repaint();
+            }
+        }
+        // Drop a finished flash so it doesn't linger in state.
+        if self.flash.is_some_and(|f| now - f.start >= FLASH_DURATION) {
+            self.flash = None;
         }
     }
 
