@@ -119,8 +119,11 @@ impl ViarApp {
 
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
+                // A single "Layer" label, then just the numbers as tabs (there can
+                // be many layers, so repeating "Layer N" gets noisy).
+                ui.label(egui::RichText::new("Layer").color(self.theme.text_secondary()));
                 for layer in 0..data.layer_count as usize {
-                    let label = format!("Layer {layer}");
+                    let label = format!("{layer}");
                     let selected = data.selected_layer == layer;
                     if themed_tab(ui, selected, &label, &self.theme).clicked() {
                         data.selected_layer = layer;
