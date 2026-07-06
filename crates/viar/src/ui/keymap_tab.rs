@@ -117,7 +117,7 @@ impl ViarApp {
         let (selected, selected_rect, layer_idx, copy, paste) = {
             let data = self.keymap_data.as_mut().unwrap();
 
-            ui.horizontal(|ui| {
+            let layer_bar = ui.horizontal(|ui| {
                 ui.add_space(8.0);
                 // A single "Layer" label, then just the numbers as tabs (there can
                 // be many layers, so repeating "Layer N" gets noisy).
@@ -131,6 +131,8 @@ impl ViarApp {
                     }
                 }
             });
+
+            handle_layer_scroll(ui, layer_bar.response.rect, data);
 
             ui.separator();
 
@@ -782,6 +784,30 @@ fn build_td_labels(dynamic: Option<&DynamicEntryData>) -> TdLabels {
         }
     }
     TdLabels { summaries, keycaps }
+}
+
+/// Cycle the selected layer when the wheel is scrolled over `bar_rect` (wraps
+/// around). Uses this frame's discrete `MouseWheel` events rather than the
+/// smoothed scroll delta, so one wheel notch advances exactly one layer.
+fn handle_layer_scroll(ui: &egui::Ui, bar_rect: egui::Rect, data: &mut KeymapData) {
+    let count = data.layer_count as i32;
+    if count == 0 || !ui.rect_contains_pointer(bar_rect) {
+        return;
+    }
+    let wheel: f32 = ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                _ => None,
+            })
+            .sum()
+    });
+    if wheel != 0.0 {
+        let step = if wheel < 0.0 { 1 } else { -1 };
+        data.selected_layer = (data.selected_layer as i32 + step).rem_euclid(count) as usize;
+        data.selected = None;
+    }
 }
 
 /// Immutable context shared while drawing the keyboard's keycaps: the loaded
