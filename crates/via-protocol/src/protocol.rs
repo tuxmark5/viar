@@ -620,7 +620,10 @@ impl<'a> ViaProtocol<'a> {
                 break;
             }
             if gt <= prev_gt {
-                warn!(gt, "VialRGB supported-effects query did not advance; stopping");
+                warn!(
+                    gt,
+                    "VialRGB supported-effects query did not advance; stopping"
+                );
                 break;
             }
         }
