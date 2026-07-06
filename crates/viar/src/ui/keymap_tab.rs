@@ -995,10 +995,24 @@ fn encoder_shape(enc: &EncoderPosition) -> EncoderShape {
 
 /// One editable region of an encoder (a rotation direction or the push switch).
 struct EncoderSlot {
-    rect:   egui::Rect,
-    target: EditTarget,
+    rect:     egui::Rect,
+    target:   EditTarget,
     /// Direction glyph, or "" for the push slot.
-    glyph:  &'static str,
+    glyph:    &'static str,
+    /// Only the encoder's outer corners are rounded; shared inner edges stay
+    /// square so the split reads as one control.
+    rounding: egui::CornerRadius,
+}
+
+/// Corner radius rounding only the requested (outer) corners, squaring the rest.
+fn outer_corners(nw: bool, ne: bool, sw: bool, se: bool) -> egui::CornerRadius {
+    let r = 3;
+    egui::CornerRadius {
+        nw: if nw { r } else { 0 },
+        ne: if ne { r } else { 0 },
+        sw: if sw { r } else { 0 },
+        se: if se { r } else { 0 },
+    }
 }
 
 /// Split a rect into `n` equal columns (left to right).
@@ -1038,13 +1052,16 @@ fn encoder_slots(enc: &EncoderPosition, rect: egui::Rect) -> Vec<EncoderSlot> {
         clockwise: true,
     };
     let push = enc.push.map(|(row, col)| EditTarget::Push { row, col });
-    let slot = |rect: egui::Rect, target, glyph| EncoderSlot {
+    let slot = |rect: egui::Rect, target, glyph, rounding| EncoderSlot {
         rect: rect.shrink(1.0),
         target,
         glyph,
+        rounding,
     };
 
     match encoder_shape(enc) {
+        // push spans the top (round the two top corners); CCW / CW take the
+        // bottom-left / bottom-right corners.
         EncoderShape::SplitQuad => {
             let top = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.center().y));
             let bl = egui::Rect::from_min_max(
@@ -1054,37 +1071,105 @@ fn encoder_slots(enc: &EncoderPosition, rect: egui::Rect) -> Vec<EncoderSlot> {
             let br = egui::Rect::from_min_max(rect.center(), rect.max);
             let mut slots = Vec::new();
             if let Some(p) = push {
-                slots.push(slot(top, p, ""));
+                slots.push(slot(top, p, "", outer_corners(true, true, false, false)));
             }
-            slots.push(slot(bl, ccw, GLYPH_CCW));
-            slots.push(slot(br, cw, GLYPH_CW));
+            slots.push(slot(
+                bl,
+                ccw,
+                GLYPH_CCW,
+                outer_corners(false, false, true, false),
+            ));
+            slots.push(slot(
+                br,
+                cw,
+                GLYPH_CW,
+                outer_corners(false, false, false, true),
+            ));
             slots
         }
+        // CCW | push | CW: outer columns round their left / right corners.
         EncoderShape::RowTriple => {
             let cols = split_h(rect, 3);
-            let mut slots = vec![slot(cols[0], ccw, GLYPH_CCW)];
+            let mut slots = vec![slot(
+                cols[0],
+                ccw,
+                GLYPH_CCW,
+                outer_corners(true, false, true, false),
+            )];
             if let Some(p) = push {
-                slots.push(slot(cols[1], p, ""));
+                slots.push(slot(
+                    cols[1],
+                    p,
+                    "",
+                    outer_corners(false, false, false, false),
+                ));
             }
-            slots.push(slot(cols[2], cw, GLYPH_CW));
+            slots.push(slot(
+                cols[2],
+                cw,
+                GLYPH_CW,
+                outer_corners(false, true, false, true),
+            ));
             slots
         }
+        // CCW / push / CW: outer rows round their top / bottom corners.
         EncoderShape::ColumnTriple => {
             let rows = split_v(rect, 3);
-            let mut slots = vec![slot(rows[0], ccw, GLYPH_CCW)];
+            let mut slots = vec![slot(
+                rows[0],
+                ccw,
+                GLYPH_CCW,
+                outer_corners(true, true, false, false),
+            )];
             if let Some(p) = push {
-                slots.push(slot(rows[1], p, ""));
+                slots.push(slot(
+                    rows[1],
+                    p,
+                    "",
+                    outer_corners(false, false, false, false),
+                ));
             }
-            slots.push(slot(rows[2], cw, GLYPH_CW));
+            slots.push(slot(
+                rows[2],
+                cw,
+                GLYPH_CW,
+                outer_corners(false, false, true, true),
+            ));
             slots
         }
         EncoderShape::SplitHorizontal => {
             let cols = split_h(rect, 2);
-            vec![slot(cols[0], ccw, GLYPH_CCW), slot(cols[1], cw, GLYPH_CW)]
+            vec![
+                slot(
+                    cols[0],
+                    ccw,
+                    GLYPH_CCW,
+                    outer_corners(true, false, true, false),
+                ),
+                slot(
+                    cols[1],
+                    cw,
+                    GLYPH_CW,
+                    outer_corners(false, true, false, true),
+                ),
+            ]
         }
         EncoderShape::SplitVertical => {
             let rows = split_v(rect, 2);
-            vec![slot(rows[0], ccw, GLYPH_CCW), slot(rows[1], cw, GLYPH_CW)]
+            vec![
+                slot(
+                    rows[0],
+                    ccw,
+                    GLYPH_CCW,
+                    outer_corners(true, true, false, false),
+                ),
+                slot(
+                    rows[1],
+                    cw,
+                    GLYPH_CW,
+                    outer_corners(false, false, true, true),
+                ),
+            ]
         }
     }
 }
@@ -1108,10 +1193,12 @@ fn render_encoder(ui: &egui::Ui, ctx: &KeymapRender, enc: &EncoderPosition) -> R
     let slots = if rotation_enabled {
         encoder_slots(enc, rect)
     } else if let Some((row, col)) = enc.push {
+        // Standalone push (rotation disabled): a normal fully-rounded key.
         vec![EncoderSlot {
-            rect:   rect.shrink(1.0),
-            target: EditTarget::Push { row, col },
-            glyph:  "",
+            rect:     rect.shrink(1.0),
+            target:   EditTarget::Push { row, col },
+            glyph:    "",
+            rounding: egui::CornerRadius::same(3),
         }]
     } else {
         Vec::new()
@@ -1145,11 +1232,10 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
     } else {
         COL_BORDER
     };
-    let rounding = egui::CornerRadius::same(3);
-    painter.rect_filled(slot.rect, rounding, bg);
+    painter.rect_filled(slot.rect, slot.rounding, bg);
     painter.rect_stroke(
         slot.rect,
-        rounding,
+        slot.rounding,
         egui::Stroke::new(1.0_f32, border),
         egui::StrokeKind::Outside,
     );
