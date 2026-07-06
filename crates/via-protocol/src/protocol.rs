@@ -1,6 +1,7 @@
 use tracing::{
     debug,
     info,
+    warn,
 };
 
 use crate::{
@@ -265,11 +266,19 @@ impl<'a> ViaProtocol<'a> {
             .send_command(&ViaCommand::vial_get_dynamic_entry_count())?;
         // Response: firmware overwrites buffer starting at 0
         // [td_count, combo_count, ko_count, arep_count, ...]
+        //
+        // Firmware that doesn't handle this command leaves the buffer untouched,
+        // so the count fields read back as 0xFF (the unhandled sentinel). A real
+        // keyboard reports 0 for a disabled feature, never 255, so treat 0xFF as
+        // "unsupported" (0). Without this, the caller would issue up to 255
+        // sequential HID reads to an unresponsive device, each blocking for the
+        // full read timeout and freezing the UI for minutes.
+        let sanitize = |count: u8| if count == 0xFF { 0 } else { count };
         let counts = DynamicEntryCounts {
-            tap_dance:    resp[0],
-            combo:        resp[1],
-            key_override: resp[2],
-            alt_repeat:   resp[3],
+            tap_dance:    sanitize(resp[0]),
+            combo:        sanitize(resp[1]),
+            key_override: sanitize(resp[2]),
+            alt_repeat:   sanitize(resp[3]),
         };
         info!(
             tap_dance = counts.tap_dance,
@@ -394,26 +403,45 @@ impl<'a> ViaProtocol<'a> {
     pub fn qmk_settings_query(&self) -> ViaResult<Vec<u16>> {
         let mut settings = Vec::new();
         let mut cursor: u16 = 0;
-        loop {
+        // Firmware that doesn't implement this query echoes the command back
+        // (or returns fixed data) with no 0xFFFF terminator. The buffer always
+        // contains 16 two-byte chunks, so the loop can only terminate via the
+        // 0xFFFF sentinel or the cursor guard below. Without the guard an
+        // unsupported keyboard loops forever on fast reads, freezing the UI.
+        //
+        // The query protocol requires the cursor to strictly advance each round
+        // ("give me IDs greater than this"), so a round that fails to advance it
+        // means we are stuck (unsupported or malformed response) and must stop.
+        // The iteration cap is a belt-and-suspenders backstop for the pathological
+        // case of a device returning ever-increasing garbage IDs.
+        for _ in 0..64 {
             let resp = self
                 .device
                 .send_command(&ViaCommand::vial_qmk_settings_query(cursor))?;
             debug!(cursor, resp = ?&resp[..], "qmk_settings_query raw response");
             // Response: pairs of (id_lo, id_hi), terminated by 0xFFFF
-            let data = &resp[..];
-            let mut found_any = false;
-            for chunk in data.chunks_exact(2) {
+            let prev_cursor = cursor;
+            let mut terminated = false;
+            for chunk in resp.chunks_exact(2) {
                 let id = u16::from_le_bytes([chunk[0], chunk[1]]);
                 if id == 0xFFFF {
-                    return Ok(settings);
+                    terminated = true;
+                    break;
                 }
                 if id != 0x0000 {
                     settings.push(id);
                 }
                 cursor = cursor.max(id); // next query: "give me IDs greater than this"
-                found_any = true;
             }
-            if !found_any {
+            if terminated {
+                break;
+            }
+            if cursor <= prev_cursor {
+                warn!(
+                    cursor,
+                    "QMK settings query did not advance; assuming unsupported"
+                );
+                settings.clear();
                 break;
             }
         }
@@ -566,23 +594,33 @@ impl<'a> ViaProtocol<'a> {
     pub fn vialrgb_get_supported_effects(&self) -> ViaResult<Vec<u16>> {
         let mut effects = Vec::new();
         let mut gt: u16 = 0;
-        loop {
+        // Like qmk_settings_query, this pages with a strictly-advancing cursor
+        // ("give me IDs greater than this") and terminates on 0xFFFF. Guard
+        // against firmware that returns non-terminated data by stopping when a
+        // round fails to advance the cursor, with an iteration cap as a backstop,
+        // so an unsupported/misbehaving device can't spin the loop forever.
+        for _ in 0..64 {
             let resp = self
                 .device
                 .send_command(&ViaCommand::vialrgb_get_supported(gt))?;
             // Response: [cmd, sub_cmd, id_lo, id_hi, id_lo, id_hi, ..., 0xFF, 0xFF]
             let data = &resp[2..];
-            let mut found_any = false;
+            let prev_gt = gt;
+            let mut terminated = false;
             for chunk in data.chunks_exact(2) {
                 let id = u16::from_le_bytes([chunk[0], chunk[1]]);
                 if id == 0xFFFF {
-                    return Ok(effects);
+                    terminated = true;
+                    break;
                 }
                 effects.push(id);
-                gt = id;
-                found_any = true;
+                gt = gt.max(id);
             }
-            if !found_any {
+            if terminated {
+                break;
+            }
+            if gt <= prev_gt {
+                warn!(gt, "VialRGB supported-effects query did not advance; stopping");
                 break;
             }
         }
