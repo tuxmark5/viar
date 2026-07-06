@@ -5,7 +5,9 @@
 
 mod command;
 pub mod device;
+pub mod encoding;
 mod error;
+pub mod key_action;
 mod keycodes;
 pub mod layout;
 mod protocol;
@@ -31,10 +33,18 @@ pub use device::{
     KeyboardDevice,
     KeyboardInfo,
 };
+pub use encoding::{
+    KeycodeEncoding,
+    KeycodeEncodingRef,
+    NewEncoding,
+    OldEncoding,
+    encoding_for_protocol,
+};
 pub use error::{
     ViaError,
     ViaResult,
 };
+pub use key_action::KeyAction;
 pub use keycodes::{
     Keycode,
     KeycodeCategory,

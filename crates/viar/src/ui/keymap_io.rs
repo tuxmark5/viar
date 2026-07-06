@@ -5,7 +5,7 @@ use tracing::{
     warn,
 };
 use via_protocol::{
-    Keycode,
+    KeyAction,
     ViaProtocol,
 };
 
@@ -16,14 +16,18 @@ use crate::types::{
 
 impl ViarApp {
     pub fn reload_keymap(&mut self) {
+        let encoding = self.encoding;
         if let (Some(dev), Some(data)) = (&self.connected_device, &mut self.keymap_data) {
             let proto = ViaProtocol::new(dev);
             match proto.read_entire_keymap(data.layer_count, data.layout.rows, data.layout.cols) {
                 Ok(km) => {
                     info!("keymap reloaded");
-                    // Replace each layer's matrix, keeping already-loaded encoder data.
+                    // Replace each layer's matrix (decoding raw), keeping encoders.
                     for (layer, matrix) in data.layers.iter_mut().zip(km) {
-                        layer.matrix = matrix;
+                        layer.matrix = matrix
+                            .into_iter()
+                            .map(|row| row.into_iter().map(|kc| encoding.decode(kc)).collect())
+                            .collect();
                     }
                     data.dirty = false;
                     data.undo.clear();
@@ -41,6 +45,7 @@ impl ViarApp {
         let Some(data) = &self.keymap_data else {
             return;
         };
+        let encoding = self.encoding;
 
         let mut layers = Vec::new();
         for (layer_idx, layer) in data.layers.iter().enumerate() {
@@ -49,11 +54,11 @@ impl ViarApp {
                 let keys: Vec<serde_json::Value> = row
                     .iter()
                     .enumerate()
-                    .map(|(col_idx, &raw_kc)| {
+                    .map(|(col_idx, &action)| {
                         serde_json::json!({
                             "col": col_idx,
-                            "raw": raw_kc,
-                            "name": Keycode(raw_kc).name(),
+                            "raw": encoding.encode(action),
+                            "name": action.name(),
                         })
                     })
                     .collect();
@@ -69,10 +74,10 @@ impl ViarApp {
                 .map(|(index, &[ccw, cw])| {
                     serde_json::json!({
                         "index": index,
-                        "ccw": ccw,
-                        "ccw_name": Keycode(ccw).name(),
-                        "cw": cw,
-                        "cw_name": Keycode(cw).name(),
+                        "ccw": encoding.encode(ccw),
+                        "ccw_name": ccw.name(),
+                        "cw": encoding.encode(cw),
+                        "cw_name": cw.name(),
                     })
                 })
                 .collect();
@@ -157,13 +162,14 @@ impl ViarApp {
             return;
         };
 
+        let encoding = self.encoding;
         let Some(data) = &mut self.keymap_data else {
             return;
         };
 
-        let mut new_matrix: Vec<Vec<Vec<u16>>> =
+        let mut new_matrix: Vec<Vec<Vec<KeyAction>>> =
             data.layers.iter().map(|l| l.matrix.clone()).collect();
-        let mut new_encoders: Vec<Vec<[u16; 2]>> =
+        let mut new_encoders: Vec<Vec<[KeyAction; 2]>> =
             data.layers.iter().map(|l| l.encoders.clone()).collect();
         for layer_obj in layers {
             let layer_idx = layer_obj["layer"].as_u64().unwrap_or(0) as usize;
@@ -183,7 +189,7 @@ impl ViarApp {
                         let col_idx = key_obj["col"].as_u64().unwrap_or(0) as usize;
                         let raw = key_obj["raw"].as_u64().unwrap_or(0) as u16;
                         if col_idx < new_matrix[layer_idx][row_idx].len() {
-                            new_matrix[layer_idx][row_idx][col_idx] = raw;
+                            new_matrix[layer_idx][row_idx][col_idx] = encoding.decode(raw);
                         }
                     }
                 }
@@ -195,7 +201,8 @@ impl ViarApp {
                     if index < new_encoders[layer_idx].len() {
                         let ccw = enc_obj["ccw"].as_u64().unwrap_or(0) as u16;
                         let cw = enc_obj["cw"].as_u64().unwrap_or(0) as u16;
-                        new_encoders[layer_idx][index] = [ccw, cw];
+                        new_encoders[layer_idx][index] =
+                            [encoding.decode(ccw), encoding.decode(cw)];
                     }
                 }
             }
@@ -210,7 +217,12 @@ impl ViarApp {
                     for (col, &new) in row_keys.iter().enumerate() {
                         let old = data.keycode_at(layer, row as u8, col as u8);
                         if old != new {
-                            match proto.set_keycode(layer as u8, row as u8, col as u8, new) {
+                            match proto.set_keycode(
+                                layer as u8,
+                                row as u8,
+                                col as u8,
+                                encoding.encode(new),
+                            ) {
                                 Ok(()) => changed += 1,
                                 Err(e) => {
                                     warn!(error = %e, layer, row, col, "failed to write key");
@@ -228,9 +240,14 @@ impl ViarApp {
                             .layers
                             .get(layer)
                             .map(|l| l.encoder(index as u8, clockwise))
-                            .unwrap_or(0);
+                            .unwrap_or_default();
                         if old != new {
-                            match proto.set_encoder(layer as u8, index as u8, clockwise, new) {
+                            match proto.set_encoder(
+                                layer as u8,
+                                index as u8,
+                                clockwise,
+                                encoding.encode(new),
+                            ) {
                                 Ok(()) => changed += 1,
                                 Err(e) => {
                                     warn!(error = %e, layer, index, clockwise, "failed to write encoder");

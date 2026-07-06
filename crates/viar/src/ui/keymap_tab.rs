@@ -4,8 +4,12 @@ use eframe::egui;
 use via_protocol::{
     EncoderKey,
     EncoderPosition,
+    KeyAction,
     Keycode,
+    KeycodeEncoding,
+    KeycodeEncodingRef,
     KeycodeGroup,
+    NewEncoding,
 };
 
 use crate::{
@@ -20,6 +24,7 @@ use crate::{
     ui::keycode_builder::render_keycode_builder,
     util::{
         CategoryStyle,
+        action_name,
         aliased_name,
         themed_tab,
     },
@@ -131,6 +136,7 @@ impl ViarApp {
                     combo_map: &combo_map,
                     td: &td_labels,
                     aliases: aliases_ref,
+                    encoding: self.encoding,
                     flash,
                 };
                 render_keyboard(ui, &ctx)
@@ -165,8 +171,8 @@ impl ViarApp {
         }
 
         // Handle deferred keycode application
-        let pending: Option<(EditTarget, u16)> = ui.memory(|mem| {
-            let kc: Option<u16> = mem.data.get_temp(egui::Id::new("pending_keycode"));
+        let pending: Option<(EditTarget, KeyAction)> = ui.memory(|mem| {
+            let kc: Option<KeyAction> = mem.data.get_temp(egui::Id::new("pending_keycode"));
             let target: Option<EditTarget> = mem.data.get_temp(egui::Id::new("pending_target"));
             match (kc, target) {
                 (Some(kc), Some(target)) => Some((target, kc)),
@@ -176,7 +182,8 @@ impl ViarApp {
 
         if let Some((target, new_kc)) = pending {
             ui.memory_mut(|mem| {
-                mem.data.remove::<u16>(egui::Id::new("pending_keycode"));
+                mem.data
+                    .remove::<KeyAction>(egui::Id::new("pending_keycode"));
                 mem.data
                     .remove::<EditTarget>(egui::Id::new("pending_target"));
             });
@@ -205,8 +212,9 @@ impl ViarApp {
                 } else {
                     data.selected = Some(target);
                     // Open on the tab that holds this slot's current keycode
-                    // (e.g. F5 opens the "F-Keys" group).
-                    let kc = data.target_keycode(layer_idx, target);
+                    // (e.g. F5 opens the "F-Keys" group). Groups are in the
+                    // canonical scheme, so encode the action to match.
+                    let kc = NewEncoding.encode(data.target_keycode(layer_idx, target));
                     if let Some(group) = self
                         .picker_groups
                         .iter()
@@ -273,21 +281,29 @@ impl ViarApp {
     ) {
         // Snapshot the slot's current keycode / header, then release the
         // keymap_data borrow so the picker body can freely touch other self fields.
-        let (raw_kc, header, kc_name, kc_category) = {
+        let (raw_kc, device_raw, header, kc_name, kc_category) = {
             let Some(data) = self.keymap_data.as_ref() else {
                 return;
             };
-            let raw_kc = data.target_keycode(layer_idx, target);
-            let keycode = Keycode(raw_kc);
+            let action = data.target_keycode(layer_idx, target);
+            // The grid/builder catalog is authored in the canonical (new) scheme,
+            // so highlight against a canonical raw; the header/hex show the real
+            // device raw so it matches the keycap.
+            let raw_kc = NewEncoding.encode(action);
+            let device_raw = self.encoding.encode(action);
             (
                 raw_kc,
+                device_raw,
                 target_header(layer_idx, target, data),
-                aliased_name(raw_kc, aliases_ref),
-                format!("{:?}", keycode.category()),
+                action_name(action, aliases_ref),
+                format!("{:?}", action.category()),
             )
         };
 
-        let popover_w = 480.0_f32;
+        // Sized for exactly 16 layer keycodes per row: a 16-cell row spans
+        // 16*44 + 15*4 = 764 and a 17th needs 812, so keep the content width
+        // between those (plus window margin + scroll bar).
+        let popover_w = 780.0_f32;
         let popover_h = 320.0_f32;
         let (pop_x, pop_y) =
             picker_popover_pos(anchor, ui.ctx().content_rect(), popover_w, popover_h);
@@ -301,9 +317,9 @@ impl ViarApp {
             .collapsible(false)
             .title_bar(false)
             .show(ui.ctx(), |ui| {
-                render_picker_header(ui, &header, &kc_name, raw_kc, &kc_category);
+                render_picker_header(ui, &header, &kc_name, device_raw, &kc_category);
                 ui.add_space(4.0);
-                render_hex_input(ui, raw_kc, target);
+                render_hex_input(ui, device_raw, target, self.encoding);
                 ui.add_space(2.0);
 
                 // Group tabs + My Quantum tab + Builders tab
@@ -334,7 +350,8 @@ impl ViarApp {
                 };
 
                 if let Some(new_kc) = picked_kc {
-                    queue_pending_keycode(ui, new_kc, target);
+                    // Grid / builder emit canonical raw values; decode to an action.
+                    queue_pending_keycode(ui, NewEncoding.decode(new_kc), target);
                 }
             });
 
@@ -407,14 +424,21 @@ fn render_picker_header(
     });
 }
 
-/// Raw-hex keycode entry row. Queues a pending keycode on Enter or the Set button.
-fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, target: EditTarget) {
+/// Raw-hex keycode entry row. The hex is a *device* raw value (decoded through
+/// `encoding`), so it matches what the keycap shows. Queues a pending action on
+/// Enter or the Set button.
+fn render_hex_input(
+    ui: &mut egui::Ui,
+    device_raw: u16,
+    target: EditTarget,
+    encoding: KeycodeEncodingRef,
+) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Hex:").size(15.0).color(COL_HEX_LABEL));
         let hex_id = egui::Id::new("picker_hex_input");
         let mut hex_str: String = ui
             .memory(|mem| mem.data.get_temp(hex_id))
-            .unwrap_or_else(|| format!("{:04X}", raw_kc));
+            .unwrap_or_else(|| format!("{:04X}", device_raw));
         let resp = ui.add(
             egui::TextEdit::singleline(&mut hex_str)
                 .desired_width(60.0)
@@ -422,18 +446,22 @@ fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, target: EditTarget) {
         );
         ui.memory_mut(|mem| mem.data.insert_temp(hex_id, hex_str.clone()));
 
+        let parsed = |s: &str| {
+            u16::from_str_radix(s.trim(), 16)
+                .ok()
+                .map(|v| encoding.decode(v))
+        };
+
         if resp.lost_focus()
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
-            && let Ok(v) = u16::from_str_radix(hex_str.trim(), 16)
+            && let Some(action) = parsed(&hex_str)
         {
-            queue_pending_keycode(ui, v, target);
+            queue_pending_keycode(ui, action, target);
         }
 
-        let preview_kc = u16::from_str_radix(hex_str.trim(), 16).unwrap_or(0);
-        if preview_kc != 0 {
-            let preview = Keycode(preview_kc);
+        if let Some(action) = parsed(&hex_str).filter(|a| !a.is_empty()) {
             ui.label(
-                egui::RichText::new(format!("→ {}", preview.name()))
+                egui::RichText::new(format!("→ {}", action.name()))
                     .size(15.0)
                     .color(COL_PREVIEW),
             );
@@ -445,16 +473,16 @@ fn render_hex_input(ui: &mut egui::Ui, raw_kc: u16, target: EditTarget) {
                     .corner_radius(egui::CornerRadius::same(3)),
             )
             .clicked()
-            && let Ok(v) = u16::from_str_radix(hex_str.trim(), 16)
+            && let Some(action) = parsed(&hex_str)
         {
-            queue_pending_keycode(ui, v, target);
+            queue_pending_keycode(ui, action, target);
         }
     });
 }
 
-/// Stash a keycode + edit target in egui memory for the main loop to apply after
+/// Stash an action + edit target in egui memory for the main loop to apply after
 /// the frame (avoids mutating self from inside the picker closures).
-fn queue_pending_keycode(ui: &egui::Ui, keycode: u16, target: EditTarget) {
+fn queue_pending_keycode(ui: &egui::Ui, keycode: KeyAction, target: EditTarget) {
     ui.memory_mut(|mem| {
         mem.data
             .insert_temp(egui::Id::new("pending_keycode"), keycode);
@@ -888,6 +916,9 @@ struct KeymapRender<'a> {
     combo_map: &'a HashMap<u16, Vec<ComboInfo>>,
     td:        &'a TdLabels,
     aliases:   Option<&'a HashMap<String, String>>,
+    /// Device keycode encoding — combos/tap-dance are keyed by raw device values,
+    /// so a keycap's action is encoded back to raw for those lookups.
+    encoding:  KeycodeEncodingRef,
     /// Active copy/paste pulse: (flashing slot, 0..1 progress, color).
     flash:     Option<(EditTarget, f32, egui::Color32)>,
 }
@@ -1021,8 +1052,9 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     let key_pos = &ctx.data.layout.keys[key_idx];
     let painter = ui.painter();
 
-    let raw_kc = ctx.data.keycode_at(ctx.layer_idx, key_pos.row, key_pos.col);
-    let keycode = Keycode(raw_kc);
+    let action = ctx.data.keycode_at(ctx.layer_idx, key_pos.row, key_pos.col);
+    // Raw device value, for combo / tap-dance lookups keyed by it.
+    let raw_kc = ctx.encoding.encode(action);
 
     let px = ctx.origin.x + key_pos.x * ctx.key_size;
     let py = ctx.origin.y + key_pos.y * ctx.key_size;
@@ -1039,7 +1071,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     } else if is_hovered {
         COL_HOVER_BG
     } else {
-        keycode.category().bg()
+        action.category().bg()
     };
 
     let border_color = if is_selected {
@@ -1057,11 +1089,11 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
         egui::StrokeKind::Outside,
     );
 
-    let label = aliased_name(raw_kc, ctx.aliases);
+    let label = action_name(action, ctx.aliases);
 
     let text_color = if is_selected {
         egui::Color32::WHITE
-    } else if raw_kc == 0 || raw_kc == 1 {
+    } else if action.is_empty() {
         COL_TEXT_DIM
     } else {
         COL_TEXT
@@ -1073,7 +1105,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
         .keycaps
         .get(&raw_kc)
         .cloned()
-        .or_else(|| keycode.dual_labels());
+        .or_else(|| action.dual_labels());
 
     if let Some((tap, hold)) = split_labels {
         // Split keycap: tap label on top, hold label on bottom
@@ -1455,8 +1487,7 @@ fn render_encoder(ui: &egui::Ui, ctx: &KeymapRender, enc: &EncoderPosition) -> R
 /// report its click / selection like a key.
 fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> RenderResult {
     let painter = ui.painter();
-    let raw_kc = ctx.data.target_keycode(ctx.layer_idx, slot.target);
-    let keycode = Keycode(raw_kc);
+    let action = ctx.data.target_keycode(ctx.layer_idx, slot.target);
     let is_selected = ctx.data.selected == Some(slot.target);
     let is_hovered = ui.rect_contains_pointer(slot.rect);
 
@@ -1465,7 +1496,7 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
     } else if is_hovered {
         COL_HOVER_BG
     } else {
-        keycode.category().bg()
+        action.category().bg()
     };
     let border = if is_selected {
         COL_SELECTED_BORDER
@@ -1497,12 +1528,12 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
 
     let text_color = if is_selected {
         egui::Color32::WHITE
-    } else if raw_kc == 0 || raw_kc == 1 {
+    } else if action.is_empty() {
         COL_TEXT_DIM
     } else {
         COL_TEXT
     };
-    let label = aliased_name(raw_kc, ctx.aliases);
+    let label = action_name(action, ctx.aliases);
     let font_size = (slot.rect.height() * 0.3).clamp(7.0, 14.0);
     painter.text(
         slot.rect.center(),

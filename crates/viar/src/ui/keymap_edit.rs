@@ -7,7 +7,7 @@ use tracing::{
     warn,
 };
 use via_protocol::{
-    Keycode,
+    KeyAction,
     ViaProtocol,
 };
 
@@ -24,7 +24,7 @@ use crate::{
 impl ViarApp {
     /// Apply a keycode to any slot (key, encoder direction, or push) on the
     /// active layer as a single undoable action, writing it through to the device.
-    pub fn apply_edit(&mut self, target: EditTarget, new_keycode: u16) {
+    pub fn apply_edit(&mut self, target: EditTarget, new_keycode: KeyAction) {
         let Some(layer) = self.keymap_data.as_ref().map(|d| d.selected_layer) else {
             return;
         };
@@ -43,7 +43,7 @@ impl ViarApp {
         &mut self,
         layer: usize,
         target: EditTarget,
-        new_keycode: u16,
+        new_keycode: KeyAction,
     ) -> Option<EditChange> {
         let data = self.keymap_data.as_mut()?;
         let old = data.target_keycode(layer, target);
@@ -64,10 +64,7 @@ impl ViarApp {
         };
         let kc = data.target_keycode(data.selected_layer, target);
         self.copied_keycode = Some(kc);
-        self.set_status(StatusMessage::info(format!(
-            "Copied {}",
-            Keycode(kc).name()
-        )));
+        self.set_status(StatusMessage::info(format!("Copied {}", kc.name())));
     }
 
     /// Paste the clipboard keycode into a slot (shift + left-click).
@@ -182,9 +179,11 @@ impl ViarApp {
         target: EditTarget,
         layer: usize,
         matrix: Option<(u8, u8)>,
-        keycode: u16,
+        keycode: KeyAction,
         verb: &str,
     ) {
+        // Encode the action into a raw keycode in the device's scheme.
+        let raw = self.encoding.encode(keycode);
         let Some(dev) = &self.connected_device else {
             return;
         };
@@ -193,20 +192,20 @@ impl ViarApp {
             EditTarget::Encoder { index, clockwise } => {
                 // Vial keyboards use the Vial encoder command; VIA-only use VIA's.
                 if self.vial_protocol_version.is_some() {
-                    proto.vial_set_encoder(layer as u8, index, clockwise, keycode)
+                    proto.vial_set_encoder(layer as u8, index, clockwise, raw)
                 } else {
-                    proto.set_encoder(layer as u8, index, clockwise, keycode)
+                    proto.set_encoder(layer as u8, index, clockwise, raw)
                 }
             }
             EditTarget::Key(_) | EditTarget::Push { .. } => match matrix {
-                Some((row, col)) => proto.set_keycode(layer as u8, row, col, keycode),
+                Some((row, col)) => proto.set_keycode(layer as u8, row, col, raw),
                 None => return,
             },
         };
         let desc = target_desc(target, matrix);
         match result {
             Ok(()) => {
-                let name = Keycode(keycode).name();
+                let name = keycode.name();
                 info!(?target, layer, keycode = name, "keycode written to device");
                 self.set_status(StatusMessage::info(format!("{verb} {desc} -> {name}")));
             }

@@ -1,8 +1,10 @@
 use std::sync::mpsc;
 
 use via_protocol::{
+    KeyAction,
     KeyboardDevice,
     KeyboardInfo,
+    KeycodeEncodingRef,
     KeycodeGroup,
 };
 
@@ -42,6 +44,9 @@ pub struct ViarApp {
     pub keyboards: Vec<KeyboardInfo>,
     pub connected_device: Option<KeyboardDevice>,
     pub protocol_version: Option<u16>,
+    /// Keycode encoding scheme for the connected board (from its VIA protocol
+    /// version); used to decode/encode raw keycodes at the device boundary.
+    pub encoding: KeycodeEncodingRef,
     pub screen: AppScreen,
     pub keymap_data: Option<KeymapData>,
     /// Picker state
@@ -79,8 +84,8 @@ pub struct ViarApp {
     pub detected_features: Vec<String>,
     /// User-generated quantum keycodes (mod-tap, OSM, etc.) for quick picker access
     pub quantum_favorites: Vec<u16>,
-    /// Keycode copied from a slot (shift+right-click) for pasting (shift+left-click)
-    pub copied_keycode: Option<u16>,
+    /// Action copied from a slot (shift+right-click) for pasting (shift+left-click)
+    pub copied_keycode: Option<KeyAction>,
     /// A whole layer copied (shift+right-click a layer tab) for pasting into another.
     pub copied_layer: Option<KeymapLayer>,
     /// Copy/paste flash animation on a key slot (idle when its `start` is None).

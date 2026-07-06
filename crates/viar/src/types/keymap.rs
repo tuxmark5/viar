@@ -1,5 +1,8 @@
 use eframe::egui;
-use via_protocol::KeyboardLayout;
+use via_protocol::{
+    KeyAction,
+    KeyboardLayout,
+};
 
 /// What a keycode edit applies to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -24,7 +27,7 @@ impl Default for EditTarget {
 pub struct EditChange {
     pub layer:  usize,
     pub target: EditTarget,
-    pub old:    u16,
+    pub old:    KeyAction,
 }
 
 /// Undo history, grouped by action. A single-slot edit is a group of one; a
@@ -135,33 +138,33 @@ pub type LayerFlash = Flash<usize>;
 /// The keycodes for one layer: the key matrix plus per-encoder rotation codes.
 #[derive(Clone, Default)]
 pub struct KeymapLayer {
-    /// `matrix[row][col]` = raw keycode.
-    pub matrix:   Vec<Vec<u16>>,
-    /// Per-encoder `[ccw, cw]` keycodes, indexed by encoder index. Empty until
+    /// `matrix[row][col]` = decoded key action.
+    pub matrix:   Vec<Vec<KeyAction>>,
+    /// Per-encoder `[ccw, cw]` actions, indexed by encoder index. Empty until
     /// encoder data has been read from the device.
-    pub encoders: Vec<[u16; 2]>,
+    pub encoders: Vec<[KeyAction; 2]>,
 }
 
 impl KeymapLayer {
     /// Build a layer from a matrix, with no encoder data yet.
-    pub fn from_matrix(matrix: Vec<Vec<u16>>) -> Self {
+    pub fn from_matrix(matrix: Vec<Vec<KeyAction>>) -> Self {
         Self {
             matrix,
             encoders: Vec::new(),
         }
     }
 
-    /// Keycode at `(row, col)`, or 0 if out of range.
-    pub fn keycode(&self, row: u8, col: u8) -> u16 {
+    /// Action at `(row, col)`, or `KC_NO` if out of range.
+    pub fn keycode(&self, row: u8, col: u8) -> KeyAction {
         self.matrix
             .get(row as usize)
             .and_then(|r| r.get(col as usize))
             .copied()
-            .unwrap_or(0)
+            .unwrap_or_default()
     }
 
-    /// Set the keycode at `(row, col)` if it is in range.
-    pub fn set_keycode(&mut self, row: u8, col: u8, keycode: u16) {
+    /// Set the action at `(row, col)` if it is in range.
+    pub fn set_keycode(&mut self, row: u8, col: u8, keycode: KeyAction) {
         if let Some(cell) = self
             .matrix
             .get_mut(row as usize)
@@ -171,16 +174,17 @@ impl KeymapLayer {
         }
     }
 
-    /// Rotation keycode for `index` in the given direction, or 0 if out of range.
-    pub fn encoder(&self, index: u8, clockwise: bool) -> u16 {
+    /// Rotation action for `index` in the given direction, or `KC_NO` if out of
+    /// range.
+    pub fn encoder(&self, index: u8, clockwise: bool) -> KeyAction {
         self.encoders
             .get(index as usize)
             .map(|e| e[clockwise as usize])
-            .unwrap_or(0)
+            .unwrap_or_default()
     }
 
-    /// Set the rotation keycode for `index` / direction if it is in range.
-    pub fn set_encoder(&mut self, index: u8, clockwise: bool, keycode: u16) {
+    /// Set the rotation action for `index` / direction if it is in range.
+    pub fn set_encoder(&mut self, index: u8, clockwise: bool, keycode: KeyAction) {
         if let Some(e) = self.encoders.get_mut(index as usize) {
             e[clockwise as usize] = keycode;
         }
@@ -203,12 +207,12 @@ pub struct KeymapData {
 }
 
 impl KeymapData {
-    /// Keycode at `(layer, row, col)`, or 0 if any index is out of range.
-    pub fn keycode_at(&self, layer: usize, row: u8, col: u8) -> u16 {
+    /// Action at `(layer, row, col)`, or `KC_NO` if any index is out of range.
+    pub fn keycode_at(&self, layer: usize, row: u8, col: u8) -> KeyAction {
         self.layers
             .get(layer)
             .map(|l| l.keycode(row, col))
-            .unwrap_or(0)
+            .unwrap_or_default()
     }
 
     /// Matrix `(row, col)` a target resolves to, if it is a key or push switch.
@@ -220,23 +224,23 @@ impl KeymapData {
         }
     }
 
-    /// Current keycode assigned to `target` on `layer`, or 0 if out of range.
-    pub fn target_keycode(&self, layer: usize, target: EditTarget) -> u16 {
+    /// Current action assigned to `target` on `layer`, or `KC_NO` if out of range.
+    pub fn target_keycode(&self, layer: usize, target: EditTarget) -> KeyAction {
         match target {
             EditTarget::Encoder { index, clockwise } => self
                 .layers
                 .get(layer)
                 .map(|l| l.encoder(index, clockwise))
-                .unwrap_or(0),
+                .unwrap_or_default(),
             EditTarget::Key(_) | EditTarget::Push { .. } => self
                 .target_matrix(target)
                 .map(|(row, col)| self.keycode_at(layer, row, col))
-                .unwrap_or(0),
+                .unwrap_or_default(),
         }
     }
 
     /// Write `keycode` to `target` on `layer` in the local model.
-    pub fn set_target_keycode(&mut self, layer: usize, target: EditTarget, keycode: u16) {
+    pub fn set_target_keycode(&mut self, layer: usize, target: EditTarget, keycode: KeyAction) {
         match target {
             EditTarget::Encoder { index, clockwise } => {
                 if let Some(l) = self.layers.get_mut(layer) {

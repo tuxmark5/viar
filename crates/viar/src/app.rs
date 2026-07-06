@@ -6,6 +6,7 @@ use tracing::{
 };
 use via_protocol::{
     HidAccessStatus,
+    KeyAction,
     KeyboardDevice,
     LightingProtocol,
     ViaProtocol,
@@ -13,6 +14,7 @@ use via_protocol::{
         check_hid_permissions,
         discover_keyboards,
     },
+    encoding_for_protocol,
     keycode_groups,
     layout::{
         generic_layout,
@@ -46,6 +48,7 @@ impl ViarApp {
             keyboards: Vec::new(),
             connected_device: None,
             protocol_version: None,
+            encoding: encoding_for_protocol(None),
             screen: AppScreen::Detecting,
             keymap_data: None,
             picker_groups: keycode_groups(),
@@ -141,6 +144,7 @@ impl ViarApp {
     pub fn refresh(&mut self) {
         self.connected_device = None;
         self.protocol_version = None;
+        self.encoding = encoding_for_protocol(None);
         self.vial_protocol_version = None;
         self.vial_uid = None;
         self.firmware_version = None;
@@ -178,6 +182,7 @@ impl ViarApp {
             Ok(dev) => {
                 let proto = ViaProtocol::new(&dev);
                 self.protocol_version = proto.get_protocol_version().ok();
+                self.encoding = encoding_for_protocol(self.protocol_version);
                 info!(keyboard = %dev.info, "connected, deferring keymap load");
                 self.connected_device = Some(dev);
                 self.screen = AppScreen::Loading;
@@ -194,6 +199,7 @@ impl ViarApp {
         };
         let info = &dev.info;
         let proto = ViaProtocol::new(dev);
+        let encoding = self.encoding;
 
         // Capture Vial protocol info (None for VIA-only keyboards)
         if let Ok(Some((vial_ver, uid))) = proto.vial_get_keyboard_id() {
@@ -289,8 +295,17 @@ impl ViarApp {
                 ]
             }
         };
-        let mut layers: Vec<KeymapLayer> =
-            matrix.into_iter().map(KeymapLayer::from_matrix).collect();
+        // Decode raw device keycodes into encoding-independent actions.
+        let mut layers: Vec<KeymapLayer> = matrix
+            .into_iter()
+            .map(|layer| {
+                let decoded = layer
+                    .into_iter()
+                    .map(|row| row.into_iter().map(|kc| encoding.decode(kc)).collect())
+                    .collect();
+                KeymapLayer::from_matrix(decoded)
+            })
+            .collect();
 
         // Read encoder rotation keycodes (the encoder-map protocol, addressed by
         // encoder index + direction, independent of the key matrix). Encoders
@@ -310,10 +325,10 @@ impl ViarApp {
             // once); VIA-only keyboards use VIA's per-direction command.
             let is_vial = self.vial_protocol_version.is_some();
             let encoder_count = max_index as usize + 1;
-            let mut per_layer: Vec<Vec<[u16; 2]>> = Vec::with_capacity(layers.len());
+            let mut per_layer: Vec<Vec<[KeyAction; 2]>> = Vec::with_capacity(layers.len());
             let mut all_ok = true;
             'layers: for layer_idx in 0..layers.len() {
-                let mut enc = vec![[0u16; 2]; encoder_count];
+                let mut enc = vec![[KeyAction::default(); 2]; encoder_count];
                 for &index in &encoder_indices {
                     let pair = if is_vial {
                         proto
@@ -329,7 +344,9 @@ impl ViarApp {
                             })
                     };
                     match pair {
-                        Ok(codes) => enc[index as usize] = codes,
+                        Ok([ccw, cw]) => {
+                            enc[index as usize] = [encoding.decode(ccw), encoding.decode(cw)]
+                        }
                         Err(err) => {
                             warn!(error = %err, encoder = index, layer = layer_idx,
                                 "encoder map unavailable; disabling rotation editing");
@@ -595,6 +612,7 @@ impl ViarApp {
     fn clear_connection(&mut self) {
         self.connected_device = None;
         self.protocol_version = None;
+        self.encoding = encoding_for_protocol(None);
         self.vial_protocol_version = None;
         self.vial_uid = None;
         self.firmware_version = None;

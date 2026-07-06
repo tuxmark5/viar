@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use eframe::egui;
 use via_protocol::{
+    KeyAction,
     Keycode,
     KeycodeCategory,
     KeycodeGroup,
@@ -9,7 +10,9 @@ use via_protocol::{
 
 use crate::theme::Theme;
 
-/// Resolve a keycode name using aliases if available.
+/// Resolve a raw keycode's name using aliases if available. For raw `u16` values
+/// (the dynamic-entry pickers and the keycode grid, which work in the canonical
+/// scheme).
 pub fn aliased_name(raw_kc: u16, aliases: Option<&HashMap<String, String>>) -> String {
     if let Some(aliases) = aliases {
         // Tap dance range: 0x5700..=0x57FF
@@ -24,6 +27,19 @@ pub fn aliased_name(raw_kc: u16, aliases: Option<&HashMap<String, String>>) -> S
         }
     }
     Keycode(raw_kc).name()
+}
+
+/// Resolve a decoded action's name using aliases if available (for keycaps).
+/// Tap-dance keys stay `Raw`, carrying their device keycode for the alias lookup.
+pub fn action_name(action: KeyAction, aliases: Option<&HashMap<String, String>>) -> String {
+    if let (Some(aliases), KeyAction::Raw(raw)) = (aliases, action)
+        && (0x5700..=0x57FF).contains(&raw)
+        && let Some(alias) = aliases.get(&format!("td:{}", raw & 0xFF))
+        && !alias.is_empty()
+    {
+        return alias.clone();
+    }
+    action.name()
 }
 
 /// Render a tab-style selectable label with proper text contrast.

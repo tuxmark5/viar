@@ -1114,6 +1114,10 @@ pub struct KeycodeGroup {
     pub codes: Vec<Keycode>,
 }
 
+/// How many layers the picker offers for layer keycodes (MO/TG/TO/DF/OSL/TT):
+/// layers `0..LAYER_KEYCODE_COUNT`.
+const LAYER_KEYCODE_COUNT: u16 = 16;
+
 /// Get keycodes organised into groups for the picker.
 pub fn keycode_groups() -> Vec<KeycodeGroup> {
     vec![
@@ -1244,28 +1248,28 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
             name:  "Layers",
             codes: {
                 let mut v = Vec::new();
-                // MO(0)..MO(9)
-                for i in 0..10u16 {
+                // MO(0)..MO(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x5220 | i));
                 }
-                // TG(0)..TG(9)
-                for i in 0..10u16 {
+                // TG(0)..TG(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x5260 | i));
                 }
-                // TO(0)..TO(9)
-                for i in 0..10u16 {
+                // TO(0)..TO(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x5200 | i));
                 }
-                // DF(0)..DF(9)
-                for i in 0..10u16 {
+                // DF(0)..DF(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x5240 | i));
                 }
-                // OSL(0)..OSL(9)
-                for i in 0..10u16 {
+                // OSL(0)..OSL(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x5280 | i));
                 }
-                // TT(0)..TT(9)
-                for i in 0..10u16 {
+                // TT(0)..TT(15)
+                for i in 0..LAYER_KEYCODE_COUNT {
                     v.push(Keycode(0x52C0 | i));
                 }
                 // OSM (one-shot modifiers)
