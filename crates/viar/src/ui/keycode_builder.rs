@@ -83,7 +83,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    BasicKey(base_key as u8).name()
+                    BasicKey(base_key as u8).to_string()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -92,14 +92,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -108,14 +108,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -128,7 +128,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
             };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Result: {}", preview.name()))
+                    egui::RichText::new(format!("Result: {preview}"))
                         .monospace()
                         .size(15.0)
                         .color(COL_RESULT),
@@ -147,7 +147,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    BasicKey(base_key as u8).name()
+                    BasicKey(base_key as u8).to_string()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -155,14 +155,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -171,14 +171,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -191,7 +191,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
             };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Result: {}", preview.name()))
+                    egui::RichText::new(format!("Result: {preview}"))
                         .monospace()
                         .size(15.0)
                         .color(COL_RESULT),
@@ -210,7 +210,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    BasicKey(base_key as u8).name()
+                    BasicKey(base_key as u8).to_string()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -218,14 +218,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -234,14 +234,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = BasicKey(k as u8).name();
+                    let n = BasicKey(k as u8).to_string();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -254,7 +254,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
             };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Result: {}", preview.name()))
+                    egui::RichText::new(format!("Result: {preview}"))
                         .monospace()
                         .size(15.0)
                         .color(COL_RESULT),
@@ -277,7 +277,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> O
             let preview = KeyAction::OneShotMod(ModMask(mods));
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Result: {}", preview.name()))
+                    egui::RichText::new(format!("Result: {preview}"))
                         .monospace()
                         .size(15.0)
                         .color(COL_RESULT),

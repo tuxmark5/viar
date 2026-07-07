@@ -171,7 +171,7 @@ impl ViarApp {
                                             );
                                         } else {
                                             // Show tap key name as summary
-                                            let tap_name = encoding.decode(entry.on_tap).name();
+                                            let tap_name = encoding.decode(entry.on_tap).to_string();
                                             ui.label(
                                                 egui::RichText::new(tap_name)
                                                     .size(14.0)

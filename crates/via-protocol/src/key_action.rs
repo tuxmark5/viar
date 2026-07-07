@@ -82,39 +82,39 @@ impl Default for KeyAction {
     }
 }
 
+/// Human-readable name (e.g. `A`, `OSL(11)`, `LT(1,Space)`).
+impl std::fmt::Display for KeyAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            KeyAction::Basic(k) => write!(f, "{k}"),
+            // Un-modelled values fall back to hex.
+            KeyAction::Raw(raw) => write!(f, "{raw:#06x}"),
+            KeyAction::Modified { mods, key } => write!(f, "{mods}({key})"),
+            KeyAction::ModTap { mods, key } => write!(f, "{}({key})", mods.mod_tap_prefix()),
+            KeyAction::LayerTap { layer, key } => write!(f, "LT({layer},{key})"),
+            KeyAction::LayerMod { layer, mods } => write!(f, "LM({layer},{mods})"),
+            KeyAction::Momentary(l) => write!(f, "MO({l})"),
+            KeyAction::ToggleLayer(l) => write!(f, "TG({l})"),
+            KeyAction::DefLayer(l) => write!(f, "DF({l})"),
+            KeyAction::PersistentDefLayer(l) => write!(f, "PDF({l})"),
+            KeyAction::ToLayer(l) => write!(f, "TO({l})"),
+            KeyAction::OneShotLayer(l) => write!(f, "OSL({l})"),
+            KeyAction::OneShotMod(m) => write!(f, "OSM({m})"),
+            KeyAction::TapToggleLayer(l) => write!(f, "TT({l})"),
+            KeyAction::Rgb(k) => write!(f, "{k}"),
+            KeyAction::TapDance(k) => write!(f, "{k}"),
+            KeyAction::SwapHands(k) => write!(f, "{k}"),
+            KeyAction::Magic(k) => write!(f, "{k}"),
+            KeyAction::Quantum(k) => write!(f, "{k}"),
+        }
+    }
+}
+
 impl KeyAction {
     /// Whether this is an empty slot — `KC_NO` (transparent nothing) or
     /// `KC_TRANSPARENT` (falls through to the layer below).
     pub fn is_empty(self) -> bool {
         matches!(self, KeyAction::Basic(BasicKey(0 | 1)))
-    }
-
-    /// Human-readable name (e.g. `KC_A`, `OSL(11)`, `LT(1,KC_SPC)`).
-    pub fn name(self) -> String {
-        match self {
-            KeyAction::Basic(k) => k.name(),
-            // Un-modelled values fall back to hex.
-            KeyAction::Raw(raw) => format!("{raw:#06x}"),
-            KeyAction::Modified { mods, key } => format!("{mods}({})", key.name()),
-            KeyAction::ModTap { mods, key } => {
-                format!("{}({})", mods.mod_tap_prefix(), key.name())
-            }
-            KeyAction::LayerTap { layer, key } => format!("LT({layer},{})", key.name()),
-            KeyAction::LayerMod { layer, mods } => format!("LM({layer},{mods})"),
-            KeyAction::Momentary(l) => format!("MO({l})"),
-            KeyAction::ToggleLayer(l) => format!("TG({l})"),
-            KeyAction::DefLayer(l) => format!("DF({l})"),
-            KeyAction::PersistentDefLayer(l) => format!("PDF({l})"),
-            KeyAction::ToLayer(l) => format!("TO({l})"),
-            KeyAction::OneShotLayer(l) => format!("OSL({l})"),
-            KeyAction::OneShotMod(m) => format!("OSM({m})"),
-            KeyAction::TapToggleLayer(l) => format!("TT({l})"),
-            KeyAction::Rgb(k) => k.name(),
-            KeyAction::TapDance(k) => k.name(),
-            KeyAction::SwapHands(k) => k.name(),
-            KeyAction::Magic(k) => k.name(),
-            KeyAction::Quantum(k) => k.name(),
-        }
     }
 
     /// Canonical QMK name (`KC_A`) for basic/raw keycodes; `None` for parametric
@@ -132,7 +132,7 @@ impl KeyAction {
     }
 
     /// Human description for basic/raw keycodes; empty for parametric actions
-    /// (their [`name`](Self::name) already spells them out).
+    /// (their [`Display`] name already spells them out).
     pub fn description(self) -> String {
         match self {
             KeyAction::Basic(k) => k.description(),
@@ -179,9 +179,9 @@ impl KeyAction {
     pub fn dual_labels(self) -> Option<(String, String)> {
         match self {
             KeyAction::ModTap { mods, key } => {
-                Some((key.name(), mods.mod_tap_prefix().to_string()))
+                Some((key.to_string(), mods.mod_tap_prefix().to_string()))
             }
-            KeyAction::LayerTap { layer, key } => Some((key.name(), format!("LT{layer}"))),
+            KeyAction::LayerTap { layer, key } => Some((key.to_string(), format!("LT{layer}"))),
             KeyAction::LayerMod { layer, mods } => Some((format!("LM{layer}"), mods.to_string())),
             KeyAction::TapToggleLayer(l) => Some((format!("TT{l}"), format!("L{l}"))),
             KeyAction::OneShotLayer(l) => Some(("OSL".to_string(), format!("L{l}"))),
@@ -197,9 +197,9 @@ mod tests {
 
     #[test]
     fn names_layer_and_basic_actions() {
-        assert_eq!(KeyAction::OneShotLayer(LayerId(11)).name(), "OSL(11)");
-        assert_eq!(KeyAction::ToLayer(LayerId(3)).name(), "TO(3)");
-        assert_eq!(KeyAction::Basic(BasicKey(0x04)).name(), "A");
+        assert_eq!(KeyAction::OneShotLayer(LayerId(11)).to_string(), "OSL(11)");
+        assert_eq!(KeyAction::ToLayer(LayerId(3)).to_string(), "TO(3)");
+        assert_eq!(KeyAction::Basic(BasicKey(0x04)).to_string(), "A");
     }
 
     #[test]
@@ -217,14 +217,14 @@ mod tests {
     fn swap_hands_and_magic_actions() {
         // Swap-hands (0x5600–0x56FF).
         let sh = KeyAction::SwapHands(SwapHandsKey::SH_TG);
-        assert_eq!(sh.name(), "SH_TG");
+        assert_eq!(sh.to_string(), "SH_TG");
         assert_eq!(sh.category(), KeycodeCategory::SwapHands);
         // Parametric SH(kc) form.
-        assert_eq!(KeyAction::SwapHands(SwapHandsKey(0x04)).name(), "SH(A)");
+        assert_eq!(KeyAction::SwapHands(SwapHandsKey(0x04)).to_string(), "SH(A)");
 
         // Magic (0x7000–0x70FF).
         let magic = KeyAction::Magic(MagicKey::MG_GESC);
-        assert_eq!(magic.name(), "MG_GESC");
+        assert_eq!(magic.to_string(), "MG_GESC");
         assert_eq!(magic.category(), KeycodeCategory::Magic);
         assert_eq!(magic.description(), "Grave Escape (on)");
     }
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn persistent_def_layer_action() {
         let pdf = KeyAction::PersistentDefLayer(LayerId(2));
-        assert_eq!(pdf.name(), "PDF(2)");
+        assert_eq!(pdf.to_string(), "PDF(2)");
         assert_eq!(pdf.category(), KeycodeCategory::PersistentDefLayer);
         assert_eq!(
             pdf.description(),
@@ -244,7 +244,7 @@ mod tests {
     fn raw_action_naming_and_categories() {
         // Only genuinely unknown values remain Raw; they fall back to hex.
         let unknown = KeyAction::Raw(0x9999);
-        assert_eq!(unknown.name(), "0x9999");
+        assert_eq!(unknown.to_string(), "0x9999");
         assert_eq!(unknown.category(), KeycodeCategory::Unknown);
     }
 }

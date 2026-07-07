@@ -70,12 +70,14 @@ macro_rules! keycode_block {
                     _ => return None,
                 })
             }
+        }
 
-            /// Short user-facing display name, e.g. `UG_TOGG` (hex fallback).
-            pub fn name(self) -> String {
+        /// Short user-facing display name, e.g. `UG_TOGG` (hex fallback).
+        impl std::fmt::Display for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self.0 {
-                    $( $off => $short.to_string(), )+
-                    _ => format!("0x{:04X}", self.raw()),
+                    $( $off => f.write_str($short), )+
+                    _ => write!(f, "0x{:04X}", self.raw()),
                 }
             }
         }
@@ -96,22 +98,23 @@ macro_rules! basic_keys {
         impl BasicKey {
             $( pub const $long: Self = Self($val); )+
 
-            /// Short user-facing display name, e.g. `A`, `Bksp`, `VolUp`.
-            pub fn name(self) -> String {
-                match self.0 {
-                    $( $val => $short, )+
-                    v => return format!("0x{v:02X}"),
-                }
-                .to_string()
-            }
-
             /// Longer human description for tooltips.
             pub fn description(self) -> String {
                 match self.0 {
                     $( $val => $desc, )+
-                    v => return format!("{} (0x{v:04X})", self.name()),
+                    v => return format!("{self} (0x{v:04X})"),
                 }
                 .to_string()
+            }
+        }
+
+        /// Short user-facing display name, e.g. `A`, `Bksp`, `VolUp` (hex fallback).
+        impl std::fmt::Display for BasicKey {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.0 {
+                    $( $val => f.write_str($short), )+
+                    v => write!(f, "0x{v:02X}"),
+                }
             }
         }
     };

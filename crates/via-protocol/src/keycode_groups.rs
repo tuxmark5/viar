@@ -168,12 +168,12 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
                         M::RSHIFT,
                         M::RALT,
                         M::RGUI,
-                        M::CTRL.and(M::SHIFT),
-                        M::CTRL.and(M::ALT),
-                        M::CTRL.and(M::GUI),
-                        M::SHIFT.and(M::ALT),
-                        M::SHIFT.and(M::GUI),
-                        M::ALT.and(M::GUI),
+                        M::CTRL | M::SHIFT,
+                        M::CTRL | M::ALT,
+                        M::CTRL | M::GUI,
+                        M::SHIFT | M::ALT,
+                        M::SHIFT | M::GUI,
+                        M::ALT | M::GUI,
                     ]
                     .map(KeyAction::OneShotMod),
                 );

@@ -16,11 +16,6 @@ impl TapDanceKey {
         Self::BLOCK | self.0 as u16
     }
 
-    /// Short display name, e.g. `TD(3)`.
-    pub fn name(self) -> String {
-        format!("TD({})", self.0)
-    }
-
     /// Longer human description for tooltips.
     pub fn description(self) -> String {
         format!(
@@ -30,8 +25,9 @@ impl TapDanceKey {
     }
 }
 
+/// Short display name, e.g. `TD(3)`.
 impl std::fmt::Display for TapDanceKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.name())
+        write!(f, "TD({})", self.0)
     }
 }

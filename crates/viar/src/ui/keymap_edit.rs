@@ -64,7 +64,7 @@ impl ViarApp {
         };
         let kc = data.target_keycode(data.selected_layer, target);
         self.copied_keycode = Some(kc);
-        self.set_status(StatusMessage::info(format!("Copied {}", kc.name())));
+        self.set_status(StatusMessage::info(format!("Copied {kc}")));
     }
 
     /// Paste the clipboard keycode into a slot (shift + left-click).
@@ -205,7 +205,7 @@ impl ViarApp {
         let desc = target_desc(target, matrix);
         match result {
             Ok(()) => {
-                let name = keycode.name();
+                let name = keycode.to_string();
                 info!(?target, layer, keycode = name, "keycode written to device");
                 self.set_status(StatusMessage::info(format!("{verb} {desc} -> {name}")));
             }

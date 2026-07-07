@@ -455,7 +455,7 @@ fn render_hex_input(
 
         if let Some(action) = parsed(&hex_str).filter(|a| !a.is_empty()) {
             ui.label(
-                egui::RichText::new(format!("→ {}", action.name()))
+                egui::RichText::new(format!("→ {action}"))
                     .size(15.0)
                     .color(COL_PREVIEW),
             );
@@ -535,7 +535,7 @@ fn keycode_tooltip(response: egui::Response, action: KeyAction) -> egui::Respons
         let qmk = action
             .qmk_name()
             .map(str::to_string)
-            .unwrap_or_else(|| action.name());
+            .unwrap_or_else(|| action.to_string());
         ui.label(egui::RichText::new(qmk).monospace().color(COL_TEXT));
         let desc = action.description();
         if !desc.is_empty() {
@@ -557,7 +557,7 @@ fn render_quantum_favorites(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                 for &action in favorites {
-                    let name = action.name();
+                    let name = action.to_string();
                     let is_current = action == current;
                     let size = egui::vec2(56.0, 36.0);
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -767,8 +767,8 @@ fn build_combo_map(
             .map(|k| encoding.decode(k))
             .collect();
         let color = combo_color(color_idx, total);
-        let input_names: Vec<String> = active_inputs.iter().map(|a| a.name()).collect();
-        let output_name = encoding.decode(combo.output).name();
+        let input_names: Vec<String> = active_inputs.iter().map(|a| a.to_string()).collect();
+        let output_name = encoding.decode(combo.output).to_string();
         let combo_display = d.combo_name(*combo_idx);
         let desc = format!(
             "{}: {} -> {}",
@@ -809,16 +809,16 @@ fn build_td_labels(dynamic: Option<&DynamicEntryData>, encoding: KeycodeEncoding
             let td_display = d.td_name(i);
             let mut parts = Vec::new();
             if td.on_tap != 0 {
-                parts.push(format!("Tap: {}", encoding.decode(td.on_tap).name()));
+                parts.push(format!("Tap: {}", encoding.decode(td.on_tap)));
             }
             if td.on_hold != 0 {
-                parts.push(format!("Hold: {}", encoding.decode(td.on_hold).name()));
+                parts.push(format!("Hold: {}", encoding.decode(td.on_hold)));
             }
             if td.on_double_tap != 0 {
-                parts.push(format!("DTap: {}", encoding.decode(td.on_double_tap).name()));
+                parts.push(format!("DTap: {}", encoding.decode(td.on_double_tap)));
             }
             if td.on_tap_hold != 0 {
-                parts.push(format!("THold: {}", encoding.decode(td.on_tap_hold).name()));
+                parts.push(format!("THold: {}", encoding.decode(td.on_tap_hold)));
             }
             if td.tapping_term > 0 {
                 parts.push(format!("{}ms", td.tapping_term));
@@ -827,7 +827,7 @@ fn build_td_labels(dynamic: Option<&DynamicEntryData>, encoding: KeycodeEncoding
 
             // Keycap: show tap key on top, TD name on bottom
             let tap_label = if td.on_tap != 0 {
-                encoding.decode(td.on_tap).name()
+                encoding.decode(td.on_tap).to_string()
             } else {
                 td_display.clone()
             };

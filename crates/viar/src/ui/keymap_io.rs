@@ -58,7 +58,7 @@ impl ViarApp {
                         serde_json::json!({
                             "col": col_idx,
                             "raw": encoding.encode(action),
-                            "name": action.name(),
+                            "name": action.to_string(),
                         })
                     })
                     .collect();
@@ -75,9 +75,9 @@ impl ViarApp {
                     serde_json::json!({
                         "index": index,
                         "ccw": encoding.encode(ccw),
-                        "ccw_name": ccw.name(),
+                        "ccw_name": ccw.to_string(),
                         "cw": encoding.encode(cw),
-                        "cw_name": cw.name(),
+                        "cw_name": cw.to_string(),
                     })
                 })
                 .collect();

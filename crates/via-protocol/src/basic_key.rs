@@ -208,8 +208,3 @@ basic_keys! {
     0xE7 => "RGui", KC_RIGHT_GUI, "Right GUI / Super / Command",
 }
 
-impl std::fmt::Display for BasicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}

@@ -19,7 +19,7 @@ pub fn action_name(action: KeyAction, aliases: Option<&HashMap<String, String>>)
     {
         return alias.clone();
     }
-    action.name()
+    action.to_string()
 }
 
 /// Render a tab-style selectable label with proper text contrast.
@@ -143,7 +143,7 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, action: KeyAction, is_active
     let name = if is_none {
         "---".to_string()
     } else {
-        action.name()
+        action.to_string()
     };
 
     let mut clicked = false;

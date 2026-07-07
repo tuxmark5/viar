@@ -19,45 +19,15 @@ impl ModMask {
     pub const RALT: Self = Self::ALT.and(Self::RIGHT);
     pub const RGUI: Self = Self::GUI.and(Self::RIGHT);
 
-    /// Combine two masks (bitwise OR).
+    /// Ctrl+Shift+Alt (Meh).
+    pub const MEH: Self = Self::CTRL.and(Self::SHIFT).and(Self::ALT);
+    /// Ctrl+Shift+Alt+GUI (Hyper).
+    pub const HYPER: Self = Self::MEH.and(Self::GUI);
+
+    /// Combine two masks (bitwise OR). The `const` primitive behind the `|`
+    /// operator, for use in `const` contexts (const items can't call operators).
     pub const fn and(self, other: Self) -> Self {
         Self(self.0 | other.0)
-    }
-
-    /// Human-readable form, e.g. `C+S` (Ctrl+Shift); `MOD` when empty. A set
-    /// right-hand bit prefixes each label with `R` (`RC`, `RS`, …).
-    pub fn name(self) -> String {
-        let mods = self.0;
-        let mut parts = Vec::new();
-        if mods & 0x01 != 0 {
-            parts.push("C");
-        } // Ctrl
-        if mods & 0x02 != 0 {
-            parts.push("S");
-        } // Shift
-        if mods & 0x04 != 0 {
-            parts.push("A");
-        } // Alt
-        if mods & 0x08 != 0 {
-            parts.push("G");
-        } // GUI
-        // Right-side flag — relabel to the right-hand variants.
-        if mods & 0x10 != 0 {
-            parts.iter_mut().for_each(|p| {
-                *p = match *p {
-                    "C" => "RC",
-                    "S" => "RS",
-                    "A" => "RA",
-                    "G" => "RG",
-                    _ => *p,
-                }
-            });
-        }
-        if parts.is_empty() {
-            "MOD".to_string()
-        } else {
-            parts.join("+")
-        }
     }
 
     /// QMK-style Mod-Tap prefix for this mask, e.g. `LSFT_T`, `LCTL_T`, `MEH_T`;
@@ -93,10 +63,59 @@ impl ModMask {
     }
 }
 
-/// `Display` the human-readable modifier form (`Ctrl+Shift`); use `.0` for the
+impl std::ops::BitOr for ModMask {
+    type Output = Self;
+
+    /// Combine two masks, e.g. `ModMask::CTRL | ModMask::SHIFT`.
+    fn bitor(self, rhs: Self) -> Self {
+        self.and(rhs)
+    }
+}
+
+/// Human-readable modifier form, e.g. `C+S` (Ctrl+Shift); `MOD` when empty. A set
+/// right-hand bit prefixes each label with `R` (`RC`, `RS`, …). Use `.0` for the
 /// raw mask byte.
 impl std::fmt::Display for ModMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.name())
+        // The right-side flag prefixes every label with `R` (`C` -> `RC`).
+        let prefix = if self.0 & Self::RIGHT.0 != 0 { "R" } else { "" };
+        let mut wrote_any = false;
+        for (bit, label) in [
+            (Self::CTRL, "C"),
+            (Self::SHIFT, "S"),
+            (Self::ALT, "A"),
+            (Self::GUI, "G"),
+        ] {
+            if self.0 & bit.0 != 0 {
+                if wrote_any {
+                    f.write_str("+")?;
+                }
+                write!(f, "{prefix}{label}")?;
+                wrote_any = true;
+            }
+        }
+        // No modifier bits set — a bare placeholder.
+        if wrote_any {
+            Ok(())
+        } else {
+            f.write_str("MOD")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_formats_mod_combinations() {
+        assert_eq!(ModMask::CTRL.to_string(), "C");
+        assert_eq!((ModMask::CTRL | ModMask::SHIFT).to_string(), "C+S");
+        assert_eq!(ModMask::HYPER.to_string(), "C+S+A+G");
+        assert_eq!(ModMask::RCTRL.to_string(), "RC");
+        assert_eq!((ModMask::RCTRL | ModMask::RSHIFT).to_string(), "RC+RS");
+        // No modifier bits (incl. a lone right-side flag) reads as the placeholder.
+        assert_eq!(ModMask(0x00).to_string(), "MOD");
+        assert_eq!(ModMask::RIGHT.to_string(), "MOD");
     }
 }

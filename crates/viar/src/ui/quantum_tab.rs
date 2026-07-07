@@ -141,7 +141,7 @@ impl ViarApp {
                 .collect();
 
             for k in &all_keys {
-                let name = BasicKey(*k as u8).name();
+                let name = BasicKey(*k as u8).to_string();
                 let is_selected = selected_keys.contains(k);
                 let size = egui::vec2(32.0, 24.0);
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -324,18 +324,18 @@ impl ViarApp {
                             layer: LayerId(0),
                             key:   BasicKey(0x2C),
                         }
-                        .name(),
-                        "MO" => KeyAction::Momentary(LayerId(0)).name(),
-                        "TG" => KeyAction::ToggleLayer(LayerId(0)).name(),
-                        "TO" => KeyAction::ToLayer(LayerId(0)).name(),
-                        "TT" => KeyAction::TapToggleLayer(LayerId(0)).name(),
-                        "DF" => KeyAction::DefLayer(LayerId(0)).name(),
-                        "OSL" => KeyAction::OneShotLayer(LayerId(0)).name(),
+                        .to_string(),
+                        "MO" => KeyAction::Momentary(LayerId(0)).to_string(),
+                        "TG" => KeyAction::ToggleLayer(LayerId(0)).to_string(),
+                        "TO" => KeyAction::ToLayer(LayerId(0)).to_string(),
+                        "TT" => KeyAction::TapToggleLayer(LayerId(0)).to_string(),
+                        "DF" => KeyAction::DefLayer(LayerId(0)).to_string(),
+                        "OSL" => KeyAction::OneShotLayer(LayerId(0)).to_string(),
                         "LM" => KeyAction::LayerMod {
                             layer: LayerId(0),
                             mods:  ModMask(0x02),
                         }
-                        .name(),
+                        .to_string(),
                         _ => "—".to_string(),
                     };
 
@@ -424,7 +424,7 @@ impl ViarApp {
                     ui.painter().text(
                         egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.4),
                         egui::Align2::CENTER_CENTER,
-                        &action.name(),
+                        &action.to_string(),
                         egui::FontId::proportional(11.0),
                         egui::Color32::WHITE,
                     );
@@ -447,7 +447,7 @@ impl ViarApp {
                 if response.clicked() {
                     to_remove = Some(i);
                 }
-                response.on_hover_text(format!("{} — click to remove", action.name()));
+                response.on_hover_text(format!("{action} — click to remove"));
             }
         });
 
@@ -503,7 +503,7 @@ fn render_quantum_keycap_preview(ui: &mut egui::Ui, action: KeyAction) {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            &action.name(),
+            &action.to_string(),
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );

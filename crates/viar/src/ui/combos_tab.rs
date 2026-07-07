@@ -168,9 +168,9 @@ impl ViarApp {
                                                 .input
                                                 .iter()
                                                 .filter(|&&k| k != 0)
-                                                .map(|&k| encoding.decode(k).name())
+                                                .map(|&k| encoding.decode(k).to_string())
                                                 .collect();
-                                            let out = encoding.decode(entry.output).name();
+                                            let out = encoding.decode(entry.output).to_string();
                                             ui.label(
                                                 egui::RichText::new(format!(
                                                     "{}->{}",

@@ -43,14 +43,6 @@ impl SwapHandsKey {
         })
     }
 
-    /// Short display name, e.g. `SH_TG` or `SH(A)`.
-    pub fn name(self) -> String {
-        match self.qmk_name() {
-            Some(n) => n.to_string(),
-            None => format!("SH({})", BasicKey(self.0).name()),
-        }
-    }
-
     /// Longer human description for tooltips.
     pub fn description(self) -> String {
         match self.0 {
@@ -61,13 +53,17 @@ impl SwapHandsKey {
             0xF4 => "Turn off swap hands".to_string(),
             0xF5 => "Turn on swap hands".to_string(),
             0xF6 => "One-shot swap hands".to_string(),
-            _ => format!("{} on tap, swap hands on hold", BasicKey(self.0).name()),
+            _ => format!("{} on tap, swap hands on hold", BasicKey(self.0)),
         }
     }
 }
 
+/// Short display name, e.g. `SH_TG` or `SH(A)`.
 impl std::fmt::Display for SwapHandsKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.name())
+        match self.qmk_name() {
+            Some(n) => f.write_str(n),
+            None => write!(f, "SH({})", BasicKey(self.0)),
+        }
     }
 }

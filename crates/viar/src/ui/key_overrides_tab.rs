@@ -220,8 +220,8 @@ impl ViarApp {
                                                     .color(egui::Color32::from_rgb(90, 90, 100)),
                                             );
                                         } else {
-                                            let trig = encoding.decode(entry.trigger).name();
-                                            let repl = encoding.decode(entry.replacement).name();
+                                            let trig = encoding.decode(entry.trigger).to_string();
+                                            let repl = encoding.decode(entry.replacement).to_string();
                                             let status = if !is_enabled { " [OFF]" } else { "" };
                                             ui.label(
                                                 egui::RichText::new(format!(
