@@ -133,10 +133,24 @@ impl CategoryStyle for KeycodeCategory {
     }
 }
 
-/// Render a clickable keycode chip. Returns true if clicked (to select this field).
-/// `is_active` indicates this field is currently selected for the shared picker.
+/// Render the label part of a keycode chip (colored by whether its field is the
+/// active one). Split out from [`keycode_chip`] so callers can place the label
+/// and [`keycode_chip_button`] in separate columns of a grid to align them.
+pub fn keycode_chip_label(ui: &mut egui::Ui, label: &str, is_active: bool) {
+    ui.label(
+        egui::RichText::new(format!("{label}:"))
+            .size(16.0)
+            .color(if is_active {
+                egui::Color32::from_rgb(100, 180, 255)
+            } else {
+                egui::Color32::from_rgb(140, 140, 155)
+            }),
+    );
+}
+
+/// Render just the clickable chip button (no label). Returns true if clicked.
 /// Operates on a decoded [`KeyAction`]; an unassigned slot is `KC_NO`.
-pub fn keycode_chip(ui: &mut egui::Ui, label: &str, action: KeyAction, is_active: bool) -> bool {
+pub fn keycode_chip_button(ui: &mut egui::Ui, action: KeyAction, is_active: bool) -> bool {
     let is_none = action == KeyAction::default();
     let name = if is_none {
         "---".to_string()
@@ -144,56 +158,51 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, action: KeyAction, is_active
         action.to_string()
     };
 
+    let bg = if is_active {
+        egui::Color32::from_rgb(50, 80, 120)
+    } else if is_none {
+        egui::Color32::from_rgb(40, 40, 45)
+    } else {
+        action.category().bg()
+    };
+
+    let border = if is_active {
+        egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 180, 255))
+    } else {
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(60, 60, 65))
+    };
+
+    let btn = ui.add(
+        egui::Button::new(egui::RichText::new(&name).monospace().size(16.0).color(
+            if is_none {
+                egui::Color32::from_rgb(90, 90, 100)
+            } else {
+                egui::Color32::from_rgb(220, 220, 230)
+            },
+        ))
+        .fill(bg)
+        .stroke(border)
+        .corner_radius(egui::CornerRadius::same(4))
+        .min_size(egui::vec2(60.0, 24.0)),
+    );
+
+    let btn = if is_none {
+        btn.on_hover_text("Click to select, then pick a key below")
+    } else {
+        btn.on_hover_text(action.description())
+    };
+
+    btn.clicked()
+}
+
+/// Render a clickable keycode chip (label + button). Returns true if clicked (to
+/// select this field). `is_active` indicates this field is currently selected for
+/// the shared picker.
+pub fn keycode_chip(ui: &mut egui::Ui, label: &str, action: KeyAction, is_active: bool) -> bool {
     let mut clicked = false;
-
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(format!("{label}:"))
-                .size(16.0)
-                .color(if is_active {
-                    egui::Color32::from_rgb(100, 180, 255)
-                } else {
-                    egui::Color32::from_rgb(140, 140, 155)
-                }),
-        );
-
-        let bg = if is_active {
-            egui::Color32::from_rgb(50, 80, 120)
-        } else if is_none {
-            egui::Color32::from_rgb(40, 40, 45)
-        } else {
-            action.category().bg()
-        };
-
-        let border = if is_active {
-            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 180, 255))
-        } else {
-            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(60, 60, 65))
-        };
-
-        let btn = ui.add(
-            egui::Button::new(egui::RichText::new(&name).monospace().size(16.0).color(
-                if is_none {
-                    egui::Color32::from_rgb(90, 90, 100)
-                } else {
-                    egui::Color32::from_rgb(220, 220, 230)
-                },
-            ))
-            .fill(bg)
-            .stroke(border)
-            .corner_radius(egui::CornerRadius::same(4))
-            .min_size(egui::vec2(60.0, 24.0)),
-        );
-
-        if btn.clicked() {
-            clicked = true;
-        }
-
-        if is_none {
-            btn.on_hover_text("Click to select, then pick a key below");
-        } else {
-            btn.on_hover_text(action.description());
-        }
+        keycode_chip_label(ui, label, is_active);
+        clicked = keycode_chip_button(ui, action, is_active);
     });
 
     clicked

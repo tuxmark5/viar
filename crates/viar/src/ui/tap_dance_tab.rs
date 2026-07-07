@@ -18,7 +18,8 @@ use crate::{
     },
     util::{
         is_disconnect_error,
-        keycode_chip,
+        keycode_chip_button,
+        keycode_chip_label,
         shared_keycode_picker,
     },
 };
@@ -275,16 +276,25 @@ impl ViarApp {
                 ("On Tap+Hold", entry.on_tap_hold, TapDanceField::OnTapHold),
             ];
 
-            for (label, value, field) in &fields {
-                let is_active =
-                    active_field == Some(ActiveKeycodeField::TapDance(editing_idx, field.clone()));
-                if keycode_chip(ui, label, encoding.decode(*value), is_active)
-                    && let Some(dynamic) = self.dynamic_data.as_mut()
-                {
-                    dynamic.active_field =
-                        Some(ActiveKeycodeField::TapDance(editing_idx, field.clone()));
-                }
-            }
+            // Lay the fields out in a two-column grid (label | chip) so the chips
+            // line up regardless of label width.
+            egui::Grid::new("td_fields")
+                .num_columns(2)
+                .spacing([10.0, 8.0])
+                .show(ui, |ui| {
+                    for (label, value, field) in &fields {
+                        let is_active = active_field
+                            == Some(ActiveKeycodeField::TapDance(editing_idx, field.clone()));
+                        keycode_chip_label(ui, label, is_active);
+                        if keycode_chip_button(ui, encoding.decode(*value), is_active)
+                            && let Some(dynamic) = self.dynamic_data.as_mut()
+                        {
+                            dynamic.active_field =
+                                Some(ActiveKeycodeField::TapDance(editing_idx, field.clone()));
+                        }
+                        ui.end_row();
+                    }
+                });
 
             // Tapping term slider
             ui.add_space(8.0);
