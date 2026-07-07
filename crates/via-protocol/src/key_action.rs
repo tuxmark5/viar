@@ -3,19 +3,18 @@
 //! A [`KeyAction`] is what a raw `u16` keycode *means* (`OneShotLayer(11)`,
 //! `ModTap { .. }`, `Basic(KC_A)`), independent of the numeric scheme the
 //! keyboard uses on the wire. Conversion to/from raw values lives in
-//! [`crate::encoding`]. The raw [`Keycode`] newtype stays around as a naming
-//! helper for basic/raw values that a `KeyAction` delegates to.
+//! [`crate::encoding`]. Every modelled variant names/describes/categorizes
+//! itself; the [`Raw`](KeyAction::Raw) catch-all (genuinely unknown values) just
+//! falls back to a hex rendering.
 
 use crate::{
     basic_key::BasicKey,
-    keycodes::{
-        Keycode,
-        KeycodeCategory,
-        mod_tap_prefix,
-    },
+    keycodes::KeycodeCategory,
+    magic_key::MagicKey,
     mod_mask::ModMask,
     quantum_key::QuantumKey,
     rgb_key::RgbKey,
+    swap_hands_key::SwapHandsKey,
     tap_dance_key::TapDanceKey,
 };
 
@@ -51,6 +50,8 @@ pub enum KeyAction {
     ToggleLayer(LayerId),
     /// DF(layer) — set default layer.
     DefLayer(LayerId),
+    /// PDF(layer) — persistently set the default layer (survives reboot).
+    PersistentDefLayer(LayerId),
     /// TO(layer) — activate layer, deactivating others.
     ToLayer(LayerId),
     /// OSL(layer) — one-shot layer.
@@ -63,9 +64,13 @@ pub enum KeyAction {
     Rgb(RgbKey),
     /// TD(n) — tap-dance keycode (`0x5700` block).
     TapDance(TapDanceKey),
+    /// Swap-hands keycode (`0x5600` block).
+    SwapHands(SwapHandsKey),
+    /// QMK "magic" keycode — control/GUI swaps, NKRO, … (`0x7000` block).
+    Magic(MagicKey),
     /// QMK quantum keycode — bootloader/audio/haptic/… (`0x7C00` block).
     Quantum(QuantumKey),
-    /// Any keycode not modelled above (magic/macro/custom/…),
+    /// Any keycode not modelled above (macro/custom/unknown),
     /// kept as its raw value.
     Raw(u16),
 }
@@ -88,23 +93,26 @@ impl KeyAction {
     pub fn name(self) -> String {
         match self {
             KeyAction::Basic(k) => k.name(),
-            // Raw naming (magic/lighting/quantum) still goes through the legacy table.
-            KeyAction::Raw(raw) => Keycode(raw).name(),
+            // Un-modelled values fall back to hex.
+            KeyAction::Raw(raw) => format!("{raw:#06x}"),
             KeyAction::Modified { mods, key } => format!("{mods}({})", key.name()),
             KeyAction::ModTap { mods, key } => {
-                format!("{}({})", mod_tap_prefix(mods.0), key.name())
+                format!("{}({})", mods.mod_tap_prefix(), key.name())
             }
             KeyAction::LayerTap { layer, key } => format!("LT({layer},{})", key.name()),
             KeyAction::LayerMod { layer, mods } => format!("LM({layer},{mods})"),
             KeyAction::Momentary(l) => format!("MO({l})"),
             KeyAction::ToggleLayer(l) => format!("TG({l})"),
             KeyAction::DefLayer(l) => format!("DF({l})"),
+            KeyAction::PersistentDefLayer(l) => format!("PDF({l})"),
             KeyAction::ToLayer(l) => format!("TO({l})"),
             KeyAction::OneShotLayer(l) => format!("OSL({l})"),
             KeyAction::OneShotMod(m) => format!("OSM({m})"),
             KeyAction::TapToggleLayer(l) => format!("TT({l})"),
             KeyAction::Rgb(k) => k.name(),
             KeyAction::TapDance(k) => k.name(),
+            KeyAction::SwapHands(k) => k.name(),
+            KeyAction::Magic(k) => k.name(),
             KeyAction::Quantum(k) => k.name(),
         }
     }
@@ -115,8 +123,10 @@ impl KeyAction {
         match self {
             KeyAction::Basic(k) => k.qmk_name(),
             KeyAction::Rgb(k) => k.qmk_name(),
+            KeyAction::SwapHands(k) => k.qmk_name(),
+            KeyAction::Magic(k) => k.qmk_name(),
             KeyAction::Quantum(k) => k.qmk_name(),
-            KeyAction::Raw(raw) => Keycode(raw).qmk_name(),
+            KeyAction::Raw(raw) => crate::qmk_names::qmk_keycode_name(raw),
             _ => None,
         }
     }
@@ -128,8 +138,13 @@ impl KeyAction {
             KeyAction::Basic(k) => k.description(),
             KeyAction::Rgb(k) => k.description(),
             KeyAction::TapDance(k) => k.description(),
+            KeyAction::SwapHands(k) => k.description(),
+            KeyAction::Magic(k) => k.description(),
             KeyAction::Quantum(k) => k.description(),
-            KeyAction::Raw(raw) => Keycode(raw).description(),
+            KeyAction::PersistentDefLayer(l) => {
+                format!("Persistently set Layer {l} as default (survives reboot)")
+            }
+            KeyAction::Raw(raw) => format!("{raw:#06x} (0x{raw:04X})"),
             _ => String::new(),
         }
     }
@@ -137,9 +152,8 @@ impl KeyAction {
     /// Broad category, for picker grouping and keycap coloring.
     pub fn category(self) -> KeycodeCategory {
         match self {
-            // Basic/raw values self-classify via the legacy tables.
-            KeyAction::Basic(k) => Keycode(k.0 as u16).category(),
-            KeyAction::Raw(raw) => Keycode(raw).category(),
+            KeyAction::Basic(k) => k.category(),
+            KeyAction::Raw(_) => KeycodeCategory::Unknown,
             KeyAction::Modified { .. } => KeycodeCategory::Mod,
             KeyAction::ModTap { .. } => KeycodeCategory::ModTap,
             KeyAction::LayerTap { .. } => KeycodeCategory::LayerTap,
@@ -147,12 +161,15 @@ impl KeyAction {
             KeyAction::Momentary(_) => KeycodeCategory::LayerMomentary,
             KeyAction::ToggleLayer(_) => KeycodeCategory::LayerToggle,
             KeyAction::DefLayer(_) => KeycodeCategory::LayerDefault,
+            KeyAction::PersistentDefLayer(_) => KeycodeCategory::PersistentDefLayer,
             KeyAction::ToLayer(_) => KeycodeCategory::LayerOn,
             KeyAction::OneShotLayer(_) => KeycodeCategory::LayerOneShotLayer,
             KeyAction::OneShotMod(_) => KeycodeCategory::LayerOneShotMod,
             KeyAction::TapToggleLayer(_) => KeycodeCategory::LayerTapToggle,
             KeyAction::Rgb(_) => KeycodeCategory::Lighting,
             KeyAction::TapDance(_) => KeycodeCategory::TapDance,
+            KeyAction::SwapHands(_) => KeycodeCategory::SwapHands,
+            KeyAction::Magic(_) => KeycodeCategory::Magic,
             KeyAction::Quantum(_) => KeycodeCategory::Quantum,
         }
     }
@@ -162,7 +179,7 @@ impl KeyAction {
     pub fn dual_labels(self) -> Option<(String, String)> {
         match self {
             KeyAction::ModTap { mods, key } => {
-                Some((key.name(), mod_tap_prefix(mods.0).to_string()))
+                Some((key.name(), mods.mod_tap_prefix().to_string()))
             }
             KeyAction::LayerTap { layer, key } => Some((key.name(), format!("LT{layer}"))),
             KeyAction::LayerMod { layer, mods } => Some((format!("LM{layer}"), mods.to_string())),
@@ -183,5 +200,51 @@ mod tests {
         assert_eq!(KeyAction::OneShotLayer(LayerId(11)).name(), "OSL(11)");
         assert_eq!(KeyAction::ToLayer(LayerId(3)).name(), "TO(3)");
         assert_eq!(KeyAction::Basic(BasicKey(0x04)).name(), "A");
+    }
+
+    #[test]
+    fn basic_action_categories() {
+        assert_eq!(KeyAction::Basic(BasicKey(0x00)).category(), KeycodeCategory::None);
+        assert_eq!(
+            KeyAction::Basic(BasicKey(0x01)).category(),
+            KeycodeCategory::Transparent
+        );
+        assert_eq!(KeyAction::Basic(BasicKey(0x04)).category(), KeycodeCategory::Basic);
+        assert_eq!(KeyAction::Basic(BasicKey(0xD1)).category(), KeycodeCategory::Mouse);
+    }
+
+    #[test]
+    fn swap_hands_and_magic_actions() {
+        // Swap-hands (0x5600–0x56FF).
+        let sh = KeyAction::SwapHands(SwapHandsKey::SH_TG);
+        assert_eq!(sh.name(), "SH_TG");
+        assert_eq!(sh.category(), KeycodeCategory::SwapHands);
+        // Parametric SH(kc) form.
+        assert_eq!(KeyAction::SwapHands(SwapHandsKey(0x04)).name(), "SH(A)");
+
+        // Magic (0x7000–0x70FF).
+        let magic = KeyAction::Magic(MagicKey::MG_GESC);
+        assert_eq!(magic.name(), "MG_GESC");
+        assert_eq!(magic.category(), KeycodeCategory::Magic);
+        assert_eq!(magic.description(), "Grave Escape (on)");
+    }
+
+    #[test]
+    fn persistent_def_layer_action() {
+        let pdf = KeyAction::PersistentDefLayer(LayerId(2));
+        assert_eq!(pdf.name(), "PDF(2)");
+        assert_eq!(pdf.category(), KeycodeCategory::PersistentDefLayer);
+        assert_eq!(
+            pdf.description(),
+            "Persistently set Layer 2 as default (survives reboot)"
+        );
+    }
+
+    #[test]
+    fn raw_action_naming_and_categories() {
+        // Only genuinely unknown values remain Raw; they fall back to hex.
+        let unknown = KeyAction::Raw(0x9999);
+        assert_eq!(unknown.name(), "0x9999");
+        assert_eq!(unknown.category(), KeycodeCategory::Unknown);
     }
 }

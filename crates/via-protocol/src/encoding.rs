@@ -17,9 +17,11 @@ use crate::{
         KeyAction,
         LayerId,
     },
+    magic_key::MagicKey,
     mod_mask::ModMask,
     quantum_key::QuantumKey,
     rgb_key::RgbKey,
+    swap_hands_key::SwapHandsKey,
     tap_dance_key::TapDanceKey,
 };
 
@@ -123,6 +125,10 @@ impl KeycodeEncoding for NewEncoding {
 /// Layer ops (MO/DF/TG/OSL/OSM/TT) span 32 values.
 const LAYER_BLOCK: u16 = 0x20;
 
+/// Persistent-default-layer base (`PDF(layer)`). Scheme-independent: it's the
+/// real new-scheme value and `0x52E0` is free in the old scheme too.
+const PERSISTENT_DEF_LAYER: u16 = 0x52E0;
+
 fn layer_mod_span(mask: u16) -> u16 {
     // 4-bit layer above the mask bits, plus the mask itself.
     ((0xF << mask.count_ones()) | mask) + 1
@@ -170,9 +176,18 @@ fn decode_with(r: &Ranges, raw: u16) -> KeyAction {
             layer: LayerId(((v >> bits) & 0xF) as u8),
             mods:  ModMask((v & r.layer_mod_mask) as u8),
         }
+    } else if let Some(v) = block(PERSISTENT_DEF_LAYER, LAYER_BLOCK) {
+        // Scheme-independent (0x52E0 is free in both schemes).
+        PersistentDefLayer(LayerId(v as u8))
+    } else if let Some(v) = block(SwapHandsKey::BLOCK, 0x100) {
+        // Swap-hands is scheme-independent (0x5600 is free in both schemes).
+        SwapHands(SwapHandsKey(v as u8))
     } else if let Some(v) = block(TapDanceKey::BLOCK, 0x100) {
         // Tap-dance is scheme-independent (0x5700 is free in both schemes).
         TapDance(TapDanceKey(v as u8))
+    } else if let Some(v) = block(MagicKey::BLOCK, 0x100) {
+        // Only reached in the new scheme; in the old scheme 0x7000 is mod-tap.
+        Magic(MagicKey(v as u8))
     } else if let Some(v) = block(RgbKey::BLOCK, 0x100) {
         // Only reached in the new scheme; in the old scheme 0x7800 is mod-tap.
         Rgb(RgbKey(v as u8))
@@ -198,12 +213,15 @@ fn encode_with(r: &Ranges, action: KeyAction) -> u16 {
         Momentary(l) => r.momentary | (l.0 as u16 & 0x1F),
         ToggleLayer(l) => r.toggle_layer | (l.0 as u16 & 0x1F),
         DefLayer(l) => r.def_layer | (l.0 as u16 & 0x1F),
+        PersistentDefLayer(l) => PERSISTENT_DEF_LAYER | (l.0 as u16 & 0x1F),
         ToLayer(l) => r.to | (l.0 as u16 & r.to_mask),
         OneShotLayer(l) => r.one_shot_layer | (l.0 as u16 & 0x1F),
         OneShotMod(m) => r.one_shot_mod | (m.0 as u16 & 0x1F),
         TapToggleLayer(l) => r.tap_toggle | (l.0 as u16 & 0x1F),
         Rgb(k) => k.raw(),
         TapDance(k) => k.raw(),
+        SwapHands(k) => k.raw(),
+        Magic(k) => k.raw(),
         Quantum(k) => k.raw(),
         Raw(raw) => raw,
     }
@@ -331,6 +349,38 @@ mod tests {
             OldEncoding.decode(0x7C00),
             KeyAction::ModTap { .. }
         ));
+    }
+
+    #[test]
+    fn swap_hands_and_magic_blocks() {
+        // Swap-hands (0x5600) is scheme-independent.
+        for e in [
+            &OldEncoding as &dyn KeycodeEncoding,
+            &NewEncoding as &dyn KeycodeEncoding,
+        ] {
+            assert_eq!(e.decode(0x56F0), KeyAction::SwapHands(SwapHandsKey::SH_TG));
+            assert_eq!(e.encode(KeyAction::SwapHands(SwapHandsKey::SH_TG)), 0x56F0);
+            // Parametric SH(kc) form round-trips too.
+            assert_eq!(e.decode(0x5604), KeyAction::SwapHands(SwapHandsKey(0x04)));
+        }
+        // Magic (0x7000) is only free in the new scheme; old = mod-tap.
+        let e = &NewEncoding;
+        assert_eq!(e.decode(0x7005), KeyAction::Magic(MagicKey::MG_GESC));
+        assert_eq!(e.encode(KeyAction::Magic(MagicKey::MG_GESC)), 0x7005);
+        assert!(matches!(OldEncoding.decode(0x7005), KeyAction::ModTap { .. }));
+    }
+
+    #[test]
+    fn persistent_def_layer_block() {
+        // PDF(layer) at 0x52E0 is scheme-independent.
+        for e in [
+            &OldEncoding as &dyn KeycodeEncoding,
+            &NewEncoding as &dyn KeycodeEncoding,
+        ] {
+            assert_eq!(e.decode(0x52E0), KeyAction::PersistentDefLayer(LayerId(0)));
+            assert_eq!(e.decode(0x52E3), KeyAction::PersistentDefLayer(LayerId(3)));
+            assert_eq!(e.encode(KeyAction::PersistentDefLayer(LayerId(3))), 0x52E3);
+        }
     }
 
     #[test]

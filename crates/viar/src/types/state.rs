@@ -83,7 +83,7 @@ pub struct ViarApp {
     /// Detected QMK features based on protocol probing
     pub detected_features: Vec<String>,
     /// User-generated quantum keycodes (mod-tap, OSM, etc.) for quick picker access
-    pub quantum_favorites: Vec<u16>,
+    pub quantum_favorites: Vec<KeyAction>,
     /// Action copied from a slot (shift+right-click) for pasting (shift+left-click)
     pub copied_keycode: Option<KeyAction>,
     /// A whole layer copied (shift+right-click a layer tab) for pasting into another.

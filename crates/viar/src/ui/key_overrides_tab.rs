@@ -5,7 +5,6 @@ use tracing::{
 };
 use via_protocol::{
     KeyOverrideEntry,
-    Keycode,
     ViaProtocol,
 };
 
@@ -105,6 +104,9 @@ impl ViarApp {
         let active_field = dynamic.active_field.clone();
         let editing_alias = dynamic.editing_alias.clone();
         let ko_names: Vec<String> = (0..count).map(|i| dynamic.ko_name(i)).collect();
+        // Key-override entries store raw device keycodes; decode/encode at this
+        // boundary so the rest of the tab works in `KeyAction`s.
+        let encoding = self.encoding;
 
         // List panel
         egui::Panel::left("ko_list_panel")
@@ -218,8 +220,8 @@ impl ViarApp {
                                                     .color(egui::Color32::from_rgb(90, 90, 100)),
                                             );
                                         } else {
-                                            let trig = Keycode(entry.trigger).name();
-                                            let repl = Keycode(entry.replacement).name();
+                                            let trig = encoding.decode(entry.trigger).name();
+                                            let repl = encoding.decode(entry.replacement).name();
                                             let status = if !is_enabled { " [OFF]" } else { "" };
                                             ui.label(
                                                 egui::RichText::new(format!(
@@ -320,7 +322,7 @@ impl ViarApp {
                     editing_idx,
                     KeyOverrideField::Trigger,
                 ));
-            if keycode_chip(ui, "Trigger Key", entry.trigger, is_active)
+            if keycode_chip(ui, "Trigger Key", encoding.decode(entry.trigger), is_active)
                 && let Some(dynamic) = self.dynamic_data.as_mut()
             {
                 dynamic.active_field = Some(ActiveKeycodeField::KeyOverride(
@@ -335,7 +337,7 @@ impl ViarApp {
                     editing_idx,
                     KeyOverrideField::Replacement,
                 ));
-            if keycode_chip(ui, "Replacement", entry.replacement, is_active)
+            if keycode_chip(ui, "Replacement", encoding.decode(entry.replacement), is_active)
                 && let Some(dynamic) = self.dynamic_data.as_mut()
             {
                 dynamic.active_field = Some(ActiveKeycodeField::KeyOverride(
@@ -441,23 +443,23 @@ impl ViarApp {
 
                         let picker_result = shared_keycode_picker(
                             ui,
-                            current_value,
+                            encoding.decode(current_value),
                             &mut group_idx,
                             &self.picker_groups,
                             field_label,
                             &self.theme,
                             self.dynamic_data.as_ref().map(|d| &d.aliases),
-                            self.encoding,
+                            encoding,
                         );
 
                         if let Some(dynamic) = self.dynamic_data.as_mut() {
                             dynamic.picker_group_idx = group_idx;
                         }
 
-                        let new_val = if picker_result.cleared {
-                            Some(0u16)
+                        let new_val: Option<u16> = if picker_result.cleared {
+                            Some(0)
                         } else {
-                            picker_result.selected
+                            picker_result.selected.map(|a| encoding.encode(a))
                         };
 
                         if let Some(val) = new_val

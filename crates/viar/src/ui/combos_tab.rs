@@ -5,7 +5,6 @@ use tracing::{
 };
 use via_protocol::{
     ComboEntry,
-    Keycode,
     ViaProtocol,
 };
 
@@ -50,6 +49,9 @@ impl ViarApp {
         let active_field = dynamic.active_field.clone();
         let editing_alias = dynamic.editing_alias.clone();
         let combo_names: Vec<String> = (0..count).map(|i| dynamic.combo_name(i)).collect();
+        // Combo entries store raw device keycodes; decode/encode at this boundary
+        // so the rest of the tab works in `KeyAction`s.
+        let encoding = self.encoding;
 
         // List panel
         egui::Panel::left("combo_list_panel")
@@ -166,9 +168,9 @@ impl ViarApp {
                                                 .input
                                                 .iter()
                                                 .filter(|&&k| k != 0)
-                                                .map(|&k| Keycode(k).name())
+                                                .map(|&k| encoding.decode(k).name())
                                                 .collect();
-                                            let out = Keycode(entry.output).name();
+                                            let out = encoding.decode(entry.output).name();
                                             ui.label(
                                                 egui::RichText::new(format!(
                                                     "{}->{}",
@@ -260,7 +262,7 @@ impl ViarApp {
                 let field = ComboField::Input(i);
                 let is_active = active_field
                     == Some(ActiveKeycodeField::Combo(editing_idx, field.clone()));
-                if keycode_chip(ui, &label, entry.input[i], is_active)
+                if keycode_chip(ui, &label, encoding.decode(entry.input[i]), is_active)
                     && let Some(dynamic) = self.dynamic_data.as_mut() {
                         dynamic.active_field =
                             Some(ActiveKeycodeField::Combo(editing_idx, field));
@@ -272,7 +274,7 @@ impl ViarApp {
             // Output field
             let is_active = active_field
                 == Some(ActiveKeycodeField::Combo(editing_idx, ComboField::Output));
-            if keycode_chip(ui, "Output", entry.output, is_active)
+            if keycode_chip(ui, "Output", encoding.decode(entry.output), is_active)
                 && let Some(dynamic) = self.dynamic_data.as_mut() {
                     dynamic.active_field =
                         Some(ActiveKeycodeField::Combo(editing_idx, ComboField::Output));
@@ -303,23 +305,23 @@ impl ViarApp {
 
                     let picker_result = shared_keycode_picker(
                         ui,
-                        current_value,
+                        encoding.decode(current_value),
                         &mut group_idx,
                         &self.picker_groups,
                         &field_label,
                         &self.theme,
                         self.dynamic_data.as_ref().map(|d| &d.aliases),
-                        self.encoding,
+                        encoding,
                     );
 
                     if let Some(dynamic) = self.dynamic_data.as_mut() {
                         dynamic.picker_group_idx = group_idx;
                     }
 
-                    let new_val = if picker_result.cleared {
-                        Some(0u16)
+                    let new_val: Option<u16> = if picker_result.cleared {
+                        Some(0)
                     } else {
-                        picker_result.selected
+                        picker_result.selected.map(|a| encoding.encode(a))
                     };
 
                     if let Some(val) = new_val

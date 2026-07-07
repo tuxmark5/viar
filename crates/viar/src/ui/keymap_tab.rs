@@ -5,11 +5,9 @@ use via_protocol::{
     EncoderKey,
     EncoderPosition,
     KeyAction,
-    Keycode,
-    KeycodeEncoding,
     KeycodeEncodingRef,
     KeycodeGroup,
-    NewEncoding,
+    TapDanceKey,
 };
 
 use crate::{
@@ -86,8 +84,8 @@ impl ViarApp {
 
         // Overlays derived from dynamic data — owned, so they don't tie up the
         // keymap_data borrow below.
-        let combo_map = build_combo_map(self.dynamic_data.as_ref());
-        let td_labels = build_td_labels(self.dynamic_data.as_ref());
+        let combo_map = build_combo_map(self.dynamic_data.as_ref(), self.encoding);
+        let td_labels = build_td_labels(self.dynamic_data.as_ref(), self.encoding);
 
         // Copy/paste pulse for this frame: (slot, 0..1 progress, color). Keep the
         // frame repainting while it plays out.
@@ -279,19 +277,16 @@ impl ViarApp {
     ) {
         // Snapshot the slot's current keycode / header, then release the
         // keymap_data borrow so the picker body can freely touch other self fields.
-        let (current, raw_kc, device_raw, header, kc_name, kc_category) = {
+        let (current, device_raw, header, kc_name, kc_category) = {
             let Some(data) = self.keymap_data.as_ref() else {
                 return;
             };
             let action = data.target_keycode(layer_idx, target);
-            // The grid highlights the current action directly. The builder /
-            // favorites still work in canonical raw values, and the header/hex
-            // show the real device raw so it matches the keycap.
-            let raw_kc = NewEncoding.encode(action);
+            // The whole picker works in `KeyAction`s; only the header/hex show the
+            // real device raw so it matches the keycap.
             let device_raw = self.encoding.encode(action);
             (
                 action,
-                raw_kc,
                 device_raw,
                 target_header(layer_idx, target, data),
                 action_name(action, aliases_ref),
@@ -341,12 +336,10 @@ impl ViarApp {
                 let picked: Option<KeyAction> = if group_idx == builder_tab_idx {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
-                        .show(ui, |ui| render_keycode_builder(ui, raw_kc))
+                        .show(ui, |ui| render_keycode_builder(ui, current))
                         .inner
-                        .map(|u| NewEncoding.decode(u))
                 } else if has_quantum_favs && group_idx == quantum_tab_idx {
-                    render_quantum_favorites(ui, &self.quantum_favorites, raw_kc)
-                        .map(|u| NewEncoding.decode(u))
+                    render_quantum_favorites(ui, &self.quantum_favorites, current)
                 } else {
                     render_keycode_grid(ui, self.picker_groups.get(group_idx), current, aliases_ref)
                 };
@@ -551,18 +544,21 @@ fn keycode_tooltip(response: egui::Response, action: KeyAction) -> egui::Respons
     })
 }
 
-/// "My Quantum" favorites grid. Returns a clicked keycode, if any.
-fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -> Option<u16> {
-    let mut picked_kc = None;
+/// "My Quantum" favorites grid. Returns a clicked action, if any.
+fn render_quantum_favorites(
+    ui: &mut egui::Ui,
+    favorites: &[KeyAction],
+    current: KeyAction,
+) -> Option<KeyAction> {
+    let mut picked = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                for &fav_raw in favorites {
-                    let action = NewEncoding.decode(fav_raw);
+                for &action in favorites {
                     let name = action.name();
-                    let is_current = fav_raw == raw_kc;
+                    let is_current = action == current;
                     let size = egui::vec2(56.0, 36.0);
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                     let is_hovered = response.hovered();
@@ -619,13 +615,13 @@ fn render_quantum_favorites(ui: &mut egui::Ui, favorites: &[u16], raw_kc: u16) -
                     }
 
                     if response.clicked() {
-                        picked_kc = Some(fav_raw);
+                        picked = Some(action);
                     }
                     keycode_tooltip(response, action);
                 }
             });
         });
-    picked_kc
+    picked
 }
 
 /// Standard keycode grid for a picker group. Returns a clicked action, if any.
@@ -744,9 +740,13 @@ fn combo_color(index: usize, total: usize) -> egui::Color32 {
     )
 }
 
-/// Build a map from keycode to the combos it participates in (with colors),
-/// for rendering combo indicator dots and tooltips.
-fn build_combo_map(dynamic: Option<&DynamicEntryData>) -> HashMap<u16, Vec<ComboInfo>> {
+/// Build a map from key action to the combos it participates in (with colors),
+/// for rendering combo indicator dots and tooltips. Combo entries store raw
+/// device values, so they're decoded through `encoding` at this boundary.
+fn build_combo_map(
+    dynamic: Option<&DynamicEntryData>,
+    encoding: KeycodeEncodingRef,
+) -> HashMap<KeyAction, Vec<ComboInfo>> {
     let Some(d) = dynamic else {
         return HashMap::new();
     };
@@ -757,12 +757,18 @@ fn build_combo_map(dynamic: Option<&DynamicEntryData>) -> HashMap<u16, Vec<Combo
         .filter(|(_, c)| c.input.iter().any(|&k| k != 0))
         .collect();
     let total = active_combos.len();
-    let mut map: HashMap<u16, Vec<ComboInfo>> = HashMap::new();
+    let mut map: HashMap<KeyAction, Vec<ComboInfo>> = HashMap::new();
     for (color_idx, (combo_idx, combo)) in active_combos.iter().enumerate() {
-        let active_inputs: Vec<u16> = combo.input.iter().copied().filter(|&k| k != 0).collect();
+        let active_inputs: Vec<KeyAction> = combo
+            .input
+            .iter()
+            .copied()
+            .filter(|&k| k != 0)
+            .map(|k| encoding.decode(k))
+            .collect();
         let color = combo_color(color_idx, total);
-        let input_names: Vec<String> = active_inputs.iter().map(|&kc| Keycode(kc).name()).collect();
-        let output_name = Keycode(combo.output).name();
+        let input_names: Vec<String> = active_inputs.iter().map(|a| a.name()).collect();
+        let output_name = encoding.decode(combo.output).name();
         let combo_display = d.combo_name(*combo_idx);
         let desc = format!(
             "{}: {} -> {}",
@@ -770,8 +776,8 @@ fn build_combo_map(dynamic: Option<&DynamicEntryData>) -> HashMap<u16, Vec<Combo
             input_names.join(" + "),
             output_name
         );
-        for &kc in &active_inputs {
-            map.entry(kc).or_default().push(ComboInfo {
+        for &action in &active_inputs {
+            map.entry(action).or_default().push(ComboInfo {
                 color,
                 description: desc.clone(),
             });
@@ -780,50 +786,52 @@ fn build_combo_map(dynamic: Option<&DynamicEntryData>) -> HashMap<u16, Vec<Combo
     map
 }
 
-/// Tap-dance overlays: per-keycode tooltip summaries and split keycap labels.
+/// Tap-dance overlays: per-action tooltip summaries and split keycap labels,
+/// keyed by the `TapDance(n)` action they apply to.
 struct TdLabels {
-    /// keycode -> full tooltip summary line.
-    summaries: HashMap<u16, String>,
-    /// keycode -> (top label, bottom label) for the keycap.
-    keycaps:   HashMap<u16, (String, String)>,
+    /// action -> full tooltip summary line.
+    summaries: HashMap<KeyAction, String>,
+    /// action -> (top label, bottom label) for the keycap.
+    keycaps:   HashMap<KeyAction, (String, String)>,
 }
 
-/// Build tap-dance tooltip summaries and keycap labels from dynamic data.
-fn build_td_labels(dynamic: Option<&DynamicEntryData>) -> TdLabels {
-    let mut summaries: HashMap<u16, String> = HashMap::new();
-    let mut keycaps: HashMap<u16, (String, String)> = HashMap::new();
+/// Build tap-dance tooltip summaries and keycap labels from dynamic data. The
+/// per-slot field values are raw device keycodes, decoded through `encoding`.
+fn build_td_labels(dynamic: Option<&DynamicEntryData>, encoding: KeycodeEncodingRef) -> TdLabels {
+    let mut summaries: HashMap<KeyAction, String> = HashMap::new();
+    let mut keycaps: HashMap<KeyAction, (String, String)> = HashMap::new();
     if let Some(d) = dynamic {
         for (i, td) in d.tap_dances.iter().enumerate() {
             if td.is_empty() {
                 continue;
             }
-            let kc_raw = 0x5700u16 | i as u16;
+            let action = KeyAction::TapDance(TapDanceKey(i as u8));
             let td_display = d.td_name(i);
             let mut parts = Vec::new();
             if td.on_tap != 0 {
-                parts.push(format!("Tap: {}", Keycode(td.on_tap).name()));
+                parts.push(format!("Tap: {}", encoding.decode(td.on_tap).name()));
             }
             if td.on_hold != 0 {
-                parts.push(format!("Hold: {}", Keycode(td.on_hold).name()));
+                parts.push(format!("Hold: {}", encoding.decode(td.on_hold).name()));
             }
             if td.on_double_tap != 0 {
-                parts.push(format!("DTap: {}", Keycode(td.on_double_tap).name()));
+                parts.push(format!("DTap: {}", encoding.decode(td.on_double_tap).name()));
             }
             if td.on_tap_hold != 0 {
-                parts.push(format!("THold: {}", Keycode(td.on_tap_hold).name()));
+                parts.push(format!("THold: {}", encoding.decode(td.on_tap_hold).name()));
             }
             if td.tapping_term > 0 {
                 parts.push(format!("{}ms", td.tapping_term));
             }
-            summaries.insert(kc_raw, format!("{}: {}", td_display, parts.join("  |  ")));
+            summaries.insert(action, format!("{}: {}", td_display, parts.join("  |  ")));
 
             // Keycap: show tap key on top, TD name on bottom
             let tap_label = if td.on_tap != 0 {
-                Keycode(td.on_tap).name()
+                encoding.decode(td.on_tap).name()
             } else {
                 td_display.clone()
             };
-            keycaps.insert(kc_raw, (tap_label, td_display));
+            keycaps.insert(action, (tap_label, td_display));
         }
     }
     TdLabels { summaries, keycaps }
@@ -917,11 +925,11 @@ struct KeymapRender<'a> {
     key_size:  f32,
     /// Gap subtracted from each key's width/height.
     gap:       f32,
-    combo_map: &'a HashMap<u16, Vec<ComboInfo>>,
+    combo_map: &'a HashMap<KeyAction, Vec<ComboInfo>>,
     td:        &'a TdLabels,
     aliases:   Option<&'a HashMap<String, String>>,
-    /// Device keycode encoding — combos/tap-dance are keyed by raw device values,
-    /// so a keycap's action is encoded back to raw for those lookups.
+    /// Device keycode encoding — only used to show a keycap's raw device value in
+    /// its hover tooltip; all lookups and logic work on `KeyAction`s directly.
     encoding:  KeycodeEncodingRef,
     /// Active copy/paste pulse: (flashing slot, 0..1 progress, color).
     flash:     Option<(EditTarget, f32, egui::Color32)>,
@@ -1057,7 +1065,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     let painter = ui.painter();
 
     let action = ctx.data.keycode_at(ctx.layer_idx, key_pos.row, key_pos.col);
-    // Raw device value, for combo / tap-dance lookups keyed by it.
+    // Raw device value, shown only in the hover tooltip.
     let raw_kc = ctx.encoding.encode(action);
 
     let px = ctx.origin.x + key_pos.x * ctx.key_size;
@@ -1107,7 +1115,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     let split_labels = ctx
         .td
         .keycaps
-        .get(&raw_kc)
+        .get(&action)
         .cloned()
         .or_else(|| action.dual_labels());
 
@@ -1163,7 +1171,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     }
 
     // Combo indicators: colored dots in top-right corner, one per combo
-    if let Some(combos) = ctx.combo_map.get(&raw_kc) {
+    if let Some(combos) = ctx.combo_map.get(&action) {
         let dot_radius = ctx.key_size * 0.06;
         for (i, combo) in combos.iter().enumerate() {
             let dot_pos = egui::pos2(
@@ -1177,7 +1185,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     draw_slot_flash(painter, ctx, rect, rounding, EditTarget::Key(key_idx));
 
     if is_hovered {
-        render_key_tooltip(ui, ctx, key_idx, key_pos.row, key_pos.col, raw_kc, &label);
+        render_key_tooltip(ui, ctx, key_idx, key_pos.row, key_pos.col, action, raw_kc, &label);
     }
 
     let mut result = slot_click(ui, is_hovered, EditTarget::Key(key_idx));
@@ -1193,6 +1201,7 @@ fn render_key_tooltip(
     key_idx: usize,
     row: u8,
     col: u8,
+    action: KeyAction,
     raw_kc: u16,
     label: &str,
 ) {
@@ -1208,7 +1217,7 @@ fn render_key_tooltip(
                 .monospace()
                 .size(16.0),
         );
-        if let Some(combos) = ctx.combo_map.get(&raw_kc) {
+        if let Some(combos) = ctx.combo_map.get(&action) {
             ui.add_space(4.0);
             for combo in combos {
                 ui.horizontal(|ui| {
@@ -1222,7 +1231,7 @@ fn render_key_tooltip(
                 });
             }
         }
-        if let Some(td_info) = ctx.td.summaries.get(&raw_kc) {
+        if let Some(td_info) = ctx.td.summaries.get(&action) {
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new(format!("Tap Dance: {td_info}"))

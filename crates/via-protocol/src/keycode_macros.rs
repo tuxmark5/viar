@@ -7,10 +7,50 @@
 /// constant's identifier and its `qmk_name()`; `SHORT` is the user-facing
 /// `name()` (the QMK short alias — canonical names are too long for
 /// keycaps/buttons). Comments and blank lines may separate entries for grouping.
+///
+/// Entries may optionally carry a free-form description literal as a fourth
+/// field (`0xOFF => SHORT, CANONICAL, "DESC"`); then `description()` returns that
+/// text instead of the default `"{category}: {canonical}"`. A block is
+/// all-or-nothing: either every entry has a description or none do.
 macro_rules! keycode_block {
+    // With a per-entry description literal.
+    (
+        $t:ty, block $block:literal, category $cat:literal,
+        { $( $off:literal => $short:literal, $long:ident, $desc:literal ),+ $(,)? }
+    ) => {
+        keycode_block!(@common $t, block $block, category $cat, { $( $off => $short, $long ),+ });
+        impl $t {
+            /// Longer human description for tooltips.
+            pub fn description(self) -> String {
+                match self.0 {
+                    $( $off => $desc.to_string(), )+
+                    _ => format!("{} keycode (0x{:04X})", $cat, self.raw()),
+                }
+            }
+        }
+    };
+
+    // Without descriptions — `description()` falls back to the canonical name.
     (
         $t:ty, block $block:literal, category $cat:literal,
         { $( $off:literal => $short:literal, $long:ident ),+ $(,)? }
+    ) => {
+        keycode_block!(@common $t, block $block, category $cat, { $( $off => $short, $long ),+ });
+        impl $t {
+            /// Longer human description for tooltips (the canonical name).
+            pub fn description(self) -> String {
+                match self.qmk_name() {
+                    Some(n) => format!("{}: {n}", $cat),
+                    None => format!("{} keycode (0x{:04X})", $cat, self.raw()),
+                }
+            }
+        }
+    };
+
+    // Shared: everything except `description()`.
+    (@common
+        $t:ty, block $block:literal, category $cat:literal,
+        { $( $off:literal => $short:literal, $long:ident ),+ }
     ) => {
         impl $t {
             /// Base of this keycode block; the full keycode is `BLOCK | offset`.
@@ -36,14 +76,6 @@ macro_rules! keycode_block {
                 match self.0 {
                     $( $off => $short.to_string(), )+
                     _ => format!("0x{:04X}", self.raw()),
-                }
-            }
-
-            /// Longer human description for tooltips (the canonical name).
-            pub fn description(self) -> String {
-                match self.qmk_name() {
-                    Some(n) => format!("{}: {n}", $cat),
-                    None => format!("{} keycode (0x{:04X})", $cat, self.raw()),
                 }
             }
         }

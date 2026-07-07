@@ -4,7 +4,6 @@ use tracing::{
     warn,
 };
 use via_protocol::{
-    Keycode,
     TapDanceEntry,
     ViaProtocol,
 };
@@ -51,6 +50,9 @@ impl ViarApp {
         let active_field = dynamic.active_field.clone();
         let editing_alias = dynamic.editing_alias.clone();
         let td_names: Vec<String> = (0..count).map(|i| dynamic.td_name(i)).collect();
+        // Tap-dance entries store raw device keycodes; decode/encode at this
+        // boundary so the rest of the tab works in `KeyAction`s.
+        let encoding = self.encoding;
 
         // Split layout: list on left, editor on right
         egui::Panel::left("td_list_panel")
@@ -169,9 +171,9 @@ impl ViarApp {
                                             );
                                         } else {
                                             // Show tap key name as summary
-                                            let tap_kc = Keycode(entry.on_tap);
+                                            let tap_name = encoding.decode(entry.on_tap).name();
                                             ui.label(
-                                                egui::RichText::new(tap_kc.name())
+                                                egui::RichText::new(tap_name)
                                                     .size(14.0)
                                                     .color(egui::Color32::from_rgb(140, 140, 155)),
                                             );
@@ -275,7 +277,7 @@ impl ViarApp {
             for (label, value, field) in &fields {
                 let is_active =
                     active_field == Some(ActiveKeycodeField::TapDance(editing_idx, field.clone()));
-                if keycode_chip(ui, label, *value, is_active)
+                if keycode_chip(ui, label, encoding.decode(*value), is_active)
                     && let Some(dynamic) = self.dynamic_data.as_mut()
                 {
                     dynamic.active_field =
@@ -344,23 +346,23 @@ impl ViarApp {
 
                 let picker_result = shared_keycode_picker(
                     ui,
-                    current_value,
+                    encoding.decode(current_value),
                     &mut group_idx,
                     &self.picker_groups,
                     field_label,
                     &self.theme,
                     self.dynamic_data.as_ref().map(|d| &d.aliases),
-                    self.encoding,
+                    encoding,
                 );
 
                 if let Some(dynamic) = self.dynamic_data.as_mut() {
                     dynamic.picker_group_idx = group_idx;
                 }
 
-                let new_val = if picker_result.cleared {
-                    Some(0u16)
+                let new_val: Option<u16> = if picker_result.cleared {
+                    Some(0)
                 } else {
-                    picker_result.selected
+                    picker_result.selected.map(|a| encoding.encode(a))
                 };
 
                 if let Some(val) = new_val

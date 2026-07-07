@@ -51,10 +51,6 @@ const fn shifted(key: BasicKey) -> KeyAction {
     }
 }
 
-const fn raw(k: u16) -> KeyAction {
-    KeyAction::Raw(k)
-}
-
 /// Every basic HID keycode (letters, numbers, common keys, F-keys, nav, numpad,
 /// modifiers), for callers that want a flat list.
 pub fn all_basic_keycodes() -> Vec<KeyAction> {
@@ -181,8 +177,8 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
                     ]
                     .map(KeyAction::OneShotMod),
                 );
-                // PDF(0)..PDF(3) — persistent default layer (no modelled variant).
-                v.extend((0..4u16).map(|i| raw(0x52E0 | i)));
+                // PDF(0)..PDF(3) — persistent default layer.
+                v.extend((0..4u8).map(|i| KeyAction::PersistentDefLayer(LayerId(i))));
                 v
             },
         },

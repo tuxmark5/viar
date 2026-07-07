@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use eframe::egui;
 use via_protocol::{
     KeyAction,
-    Keycode,
     KeycodeCategory,
     KeycodeEncodingRef,
     KeycodeGroup,
@@ -138,12 +137,13 @@ impl CategoryStyle for KeycodeCategory {
 
 /// Render a clickable keycode chip. Returns true if clicked (to select this field).
 /// `is_active` indicates this field is currently selected for the shared picker.
-pub fn keycode_chip(ui: &mut egui::Ui, label: &str, value: u16, is_active: bool) -> bool {
-    let kc = Keycode(value);
-    let name = if value == 0 {
+/// Operates on a decoded [`KeyAction`]; an unassigned slot is `KC_NO`.
+pub fn keycode_chip(ui: &mut egui::Ui, label: &str, action: KeyAction, is_active: bool) -> bool {
+    let is_none = action == KeyAction::default();
+    let name = if is_none {
         "---".to_string()
     } else {
-        kc.name()
+        action.name()
     };
 
     let mut clicked = false;
@@ -161,10 +161,10 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, value: u16, is_active: bool)
 
         let bg = if is_active {
             egui::Color32::from_rgb(50, 80, 120)
-        } else if value == 0 {
+        } else if is_none {
             egui::Color32::from_rgb(40, 40, 45)
         } else {
-            kc.category().bg()
+            action.category().bg()
         };
 
         let border = if is_active {
@@ -175,7 +175,7 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, value: u16, is_active: bool)
 
         let btn = ui.add(
             egui::Button::new(egui::RichText::new(&name).monospace().size(16.0).color(
-                if value == 0 {
+                if is_none {
                     egui::Color32::from_rgb(90, 90, 100)
                 } else {
                     egui::Color32::from_rgb(220, 220, 230)
@@ -191,10 +191,10 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, value: u16, is_active: bool)
             clicked = true;
         }
 
-        if value != 0 {
-            btn.on_hover_text(format!("0x{:04X} — {}", value, kc.description()));
-        } else {
+        if is_none {
             btn.on_hover_text("Click to select, then pick a key below");
+        } else {
+            btn.on_hover_text(action.description());
         }
     });
 
@@ -203,18 +203,19 @@ pub fn keycode_chip(ui: &mut egui::Ui, label: &str, value: u16, is_active: bool)
 
 /// Result from the shared keycode picker.
 pub struct PickerResult {
-    pub selected: Option<u16>,
+    pub selected: Option<KeyAction>,
     pub cleared:  bool,
 }
 
 /// Render the shared keycode picker grid at the bottom of an editor panel.
-/// `current_value` is the raw (device-scheme) value of the active field; the
-/// catalog is encoding-independent, so `encoding` maps its actions to raw values.
+/// `current` is the decoded action of the active field. The catalog is
+/// encoding-independent, so the grid compares actions directly; `encoding` is
+/// only used by the raw-hex entry field (the one place that speaks device values).
 /// `selected_group` / `groups` control the tab state.
-/// Returns whether a key was picked and the new (raw) value.
+/// Returns whether a key was picked and the new action.
 pub fn shared_keycode_picker(
     ui: &mut egui::Ui,
-    current_value: u16,
+    current: KeyAction,
     selected_group: &mut usize,
     groups: &[KeycodeGroup],
     active_field_label: &str,
@@ -237,7 +238,7 @@ pub fn shared_keycode_picker(
         );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if current_value != 0
+            if current != KeyAction::default()
                 && ui
                     .add(
                         egui::Button::new(
@@ -253,11 +254,12 @@ pub fn shared_keycode_picker(
                 result.cleared = true;
             }
 
-            // Hex input
+            // Hex input — the one field that speaks raw device values, so it
+            // encodes/decodes through the board's scheme.
             let hex_id = ui.id().with("shared_hex");
             let mut hex: String = ui
                 .memory(|mem| mem.data.get_temp(hex_id))
-                .unwrap_or_else(|| format!("{:04X}", current_value));
+                .unwrap_or_else(|| format!("{:04X}", encoding.encode(current)));
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut hex)
                     .desired_width(45.0)
@@ -268,7 +270,7 @@ pub fn shared_keycode_picker(
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                 && let Ok(v) = u16::from_str_radix(hex.trim(), 16)
             {
-                result.selected = Some(v);
+                result.selected = Some(encoding.decode(v));
             }
             ui.label(
                 egui::RichText::new("Hex:")
@@ -300,9 +302,8 @@ pub fn shared_keycode_picker(
                 ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                 if let Some(group) = groups.get(*selected_group) {
                     for &action in &group.codes {
-                        let raw = encoding.encode(action);
                         let kc_name = action_name(action, aliases);
-                        let is_current = raw == current_value;
+                        let is_current = action == current;
                         let size = egui::vec2(38.0, 22.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                         let is_hov = response.hovered();
@@ -347,7 +348,7 @@ pub fn shared_keycode_picker(
                         );
 
                         if response.clicked() {
-                            result.selected = Some(raw);
+                            result.selected = Some(action);
                         }
                         response.on_hover_text(action.description());
                     }

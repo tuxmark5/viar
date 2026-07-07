@@ -2,7 +2,12 @@
 //! (LT, MT, Mod+Key, OSM) from user-selected layers, modifiers, and base keys.
 
 use eframe::egui;
-use via_protocol::Keycode;
+use via_protocol::{
+    BasicKey,
+    KeyAction,
+    LayerId,
+    ModMask,
+};
 
 /// "Result:" preview text in the keycode builder.
 const COL_RESULT: egui::Color32 = egui::Color32::from_rgb(140, 200, 140);
@@ -10,9 +15,9 @@ const COL_RESULT: egui::Color32 = egui::Color32::from_rgb(140, 200, 140);
 const COL_HINT: egui::Color32 = egui::Color32::from_rgb(110, 110, 125);
 
 /// Render the keycode builder UI (LT, MT, Mod+Key, OSM).
-/// Returns Some(keycode) if the user constructed and applied a keycode.
+/// Returns Some(action) if the user constructed and applied a keycode.
 /// Free function to avoid borrow conflicts with self in keymap_tab closures.
-pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Option<u16> {
+pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current: KeyAction) -> Option<KeyAction> {
     let builder_type_id = egui::Id::new("builder_type");
     let builder_layer_id = egui::Id::new("builder_layer");
     let builder_mods_id = egui::Id::new("builder_mods");
@@ -37,19 +42,28 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
 
     ui.add_space(4.0);
 
+    // Seed the layer / mods / base-key fields from the current action's parts.
+    let (seed_layer, seed_mods, seed_base): (u8, u8, u16) = match current {
+        KeyAction::LayerTap { layer, key } => (layer.0, 0, key.0 as u16),
+        KeyAction::ModTap { mods, key } => (0, mods.0, key.0 as u16),
+        KeyAction::Modified { mods, key } => (0, mods.0, key.0 as u16),
+        KeyAction::LayerMod { layer, mods } => (layer.0, mods.0, 0),
+        KeyAction::OneShotMod(mods) => (0, mods.0, 0),
+        _ => (0, 0, 0),
+    };
+
     // State
-    let kc = Keycode(current_kc);
     let mut layer: u8 = ui
         .memory(|mem| mem.data.get_temp::<u8>(builder_layer_id))
-        .unwrap_or_else(|| kc.layer());
+        .unwrap_or(seed_layer);
     let mut mods: u8 = ui
         .memory(|mem| mem.data.get_temp::<u8>(builder_mods_id))
-        .unwrap_or_else(|| kc.mod_mask());
+        .unwrap_or(seed_mods);
     let mut base_key: u16 = ui
         .memory(|mem| mem.data.get_temp::<u16>(builder_key_id))
-        .unwrap_or_else(|| kc.base_keycode() as u16);
+        .unwrap_or(seed_base);
 
-    let mut result: Option<u16> = None;
+    let mut result: Option<KeyAction> = None;
 
     match builder_type {
         0 => {
@@ -69,7 +83,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    Keycode(base_key).name()
+                    BasicKey(base_key as u8).name()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -78,14 +92,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -94,34 +108,33 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
             });
             ui.add_space(4.0);
-            let preview = Keycode::layer_tap(layer, base_key as u8);
+            let preview = KeyAction::LayerTap {
+                layer: LayerId(layer),
+                key:   BasicKey(base_key as u8),
+            };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Result: {} (0x{:04X})",
-                        preview.name(),
-                        preview.raw()
-                    ))
-                    .monospace()
-                    .size(15.0)
-                    .color(COL_RESULT),
+                    egui::RichText::new(format!("Result: {}", preview.name()))
+                        .monospace()
+                        .size(15.0)
+                        .color(COL_RESULT),
                 );
                 if ui.button("Apply").clicked() {
-                    result = Some(preview.raw());
+                    result = Some(preview);
                 }
             });
         }
@@ -134,7 +147,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    Keycode(base_key).name()
+                    BasicKey(base_key as u8).name()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -142,14 +155,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -158,34 +171,33 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
             });
             ui.add_space(4.0);
-            let preview = Keycode::mod_tap(mods, base_key as u8);
+            let preview = KeyAction::ModTap {
+                mods: ModMask(mods),
+                key:  BasicKey(base_key as u8),
+            };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Result: {} (0x{:04X})",
-                        preview.name(),
-                        preview.raw()
-                    ))
-                    .monospace()
-                    .size(15.0)
-                    .color(COL_RESULT),
+                    egui::RichText::new(format!("Result: {}", preview.name()))
+                        .monospace()
+                        .size(15.0)
+                        .color(COL_RESULT),
                 );
                 if ui.button("Apply").clicked() {
-                    result = Some(preview.raw());
+                    result = Some(preview);
                 }
             });
         }
@@ -198,7 +210,7 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 let name = if base_key == 0 {
                     "---".to_string()
                 } else {
-                    Keycode(base_key).name()
+                    BasicKey(base_key as u8).name()
                 };
                 ui.label(egui::RichText::new(&name).monospace().size(15.0));
             });
@@ -206,14 +218,14 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                 // Letters
                 for k in 0x04u16..=0x1Du16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Numbers
                 for k in 0x1Eu16..=0x27u16 {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
@@ -222,34 +234,33 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
                 for &k in &[
                     0x2Du16, 0x2E, 0x2F, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
                 ] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
                 // Editing keys
                 for &k in &[0x28u16, 0x2C, 0x29, 0x2A, 0x2B] {
-                    let n = Keycode(k).name();
+                    let n = BasicKey(k as u8).name();
                     if ui.small_button(&n).clicked() {
                         base_key = k;
                     }
                 }
             });
             ui.add_space(4.0);
-            let preview = Keycode::mod_key(mods, base_key as u8);
+            let preview = KeyAction::Modified {
+                mods: ModMask(mods),
+                key:  BasicKey(base_key as u8),
+            };
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Result: {} (0x{:04X})",
-                        preview.name(),
-                        preview.raw()
-                    ))
-                    .monospace()
-                    .size(15.0)
-                    .color(COL_RESULT),
+                    egui::RichText::new(format!("Result: {}", preview.name()))
+                        .monospace()
+                        .size(15.0)
+                        .color(COL_RESULT),
                 );
                 if ui.button("Apply").clicked() {
-                    result = Some(preview.raw());
+                    result = Some(preview);
                 }
             });
         }
@@ -263,20 +274,16 @@ pub(crate) fn render_keycode_builder(ui: &mut egui::Ui, current_kc: u16) -> Opti
             );
             render_mod_checkboxes(ui, &mut mods);
             ui.add_space(4.0);
-            let preview = Keycode::one_shot_mod(mods);
+            let preview = KeyAction::OneShotMod(ModMask(mods));
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Result: {} (0x{:04X})",
-                        preview.name(),
-                        preview.raw()
-                    ))
-                    .monospace()
-                    .size(15.0)
-                    .color(COL_RESULT),
+                    egui::RichText::new(format!("Result: {}", preview.name()))
+                        .monospace()
+                        .size(15.0)
+                        .color(COL_RESULT),
                 );
                 if ui.button("Apply").clicked() {
-                    result = Some(preview.raw());
+                    result = Some(preview);
                 }
             });
         }

@@ -1,6 +1,9 @@
 //! A basic HID keycode (`0x00–0xFF`) and named constants for the common ones.
 
-use crate::keycode_macros::basic_keys;
+use crate::{
+    keycode_macros::basic_keys,
+    keycodes::KeycodeCategory,
+};
 
 /// A basic HID keycode (`0x00–0xFF`): letters, mods, media, mouse, NONE/TRNS.
 #[repr(transparent)]
@@ -11,6 +14,18 @@ impl BasicKey {
     /// The canonical QMK name, e.g. `KC_A`, `KC_SEMICOLON`.
     pub fn qmk_name(self) -> Option<&'static str> {
         crate::qmk_names::qmk_keycode_name(self.0 as u16)
+    }
+
+    /// Broad category of this basic HID keycode, for picker grouping and keycap
+    /// coloring.
+    pub fn category(self) -> KeycodeCategory {
+        match self.0 {
+            0x00 => KeycodeCategory::None,
+            0x01 => KeycodeCategory::Transparent,
+            // Mouse keys occupy 0x00CD–0x00D9 in QMK.
+            0xCD..=0xD9 => KeycodeCategory::Mouse,
+            _ => KeycodeCategory::Basic,
+        }
     }
 }
 

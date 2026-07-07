@@ -1,6 +1,9 @@
 use eframe::egui;
 use via_protocol::{
-    Keycode,
+    BasicKey,
+    KeyAction,
+    LayerId,
+    ModMask,
     quantum_key_types,
 };
 
@@ -138,7 +141,7 @@ impl ViarApp {
                 .collect();
 
             for k in &all_keys {
-                let name = Keycode(*k).name();
+                let name = BasicKey(*k as u8).name();
                 let is_selected = selected_keys.contains(k);
                 let size = egui::vec2(32.0, 24.0);
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -198,16 +201,19 @@ impl ViarApp {
                 );
                 ui.add_space(4.0);
 
-                let generated: Vec<u16> = selected_keys
+                let generated: Vec<KeyAction> = selected_keys
                     .iter()
-                    .map(|&k| Keycode::mod_tap(mod_mask, k as u8).raw())
+                    .map(|&k| KeyAction::ModTap {
+                        mods: ModMask(mod_mask),
+                        key:  BasicKey(k as u8),
+                    })
                     .collect();
 
                 // Show as keycap previews
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                    for &raw in &generated {
-                        render_quantum_keycap_preview(ui, Keycode(raw));
+                    for &action in &generated {
+                        render_quantum_keycap_preview(ui, action);
                     }
                 });
 
@@ -277,9 +283,8 @@ impl ViarApp {
                 let Some(mod_mask) = qt.mod_mask else {
                     continue;
                 };
-                let kc = Keycode::one_shot_mod(mod_mask);
-                let raw = kc.raw();
-                let in_favs = self.quantum_favorites.contains(&raw);
+                let action = KeyAction::OneShotMod(ModMask(mod_mask));
+                let in_favs = self.quantum_favorites.contains(&action);
 
                 let btn_text = if in_favs {
                     egui::RichText::new(format!("{} (added)", qt.name))
@@ -290,7 +295,7 @@ impl ViarApp {
                 };
 
                 if ui.button(btn_text).on_hover_text(qt.description).clicked() && !in_favs {
-                    self.quantum_favorites.push(raw);
+                    self.quantum_favorites.push(action);
                 }
             }
         });
@@ -315,14 +320,22 @@ impl ViarApp {
 
                 for qt in types {
                     let example = match qt.name {
-                        "LT" => Keycode::layer_tap(0, 0x2C).name(),
-                        "MO" => Keycode::layer_momentary(0).name(),
-                        "TG" => Keycode::layer_toggle(0).name(),
-                        "TO" => Keycode::layer_on(0).name(),
-                        "TT" => Keycode::layer_tap_toggle(0).name(),
-                        "DF" => Keycode::layer_default(0).name(),
-                        "OSL" => Keycode::one_shot_layer(0).name(),
-                        "LM" => Keycode::layer_mod(0, 0x02).name(),
+                        "LT" => KeyAction::LayerTap {
+                            layer: LayerId(0),
+                            key:   BasicKey(0x2C),
+                        }
+                        .name(),
+                        "MO" => KeyAction::Momentary(LayerId(0)).name(),
+                        "TG" => KeyAction::ToggleLayer(LayerId(0)).name(),
+                        "TO" => KeyAction::ToLayer(LayerId(0)).name(),
+                        "TT" => KeyAction::TapToggleLayer(LayerId(0)).name(),
+                        "DF" => KeyAction::DefLayer(LayerId(0)).name(),
+                        "OSL" => KeyAction::OneShotLayer(LayerId(0)).name(),
+                        "LM" => KeyAction::LayerMod {
+                            layer: LayerId(0),
+                            mods:  ModMask(0x02),
+                        }
+                        .name(),
                         _ => "—".to_string(),
                     };
 
@@ -370,8 +383,7 @@ impl ViarApp {
 
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (i, &raw) in self.quantum_favorites.iter().enumerate() {
-                let kc = Keycode(raw);
+            for (i, &action) in self.quantum_favorites.iter().enumerate() {
                 let size = egui::vec2(72.0, 52.0);
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
@@ -391,7 +403,7 @@ impl ViarApp {
                     egui::StrokeKind::Outside,
                 );
 
-                if let Some((tap, hold)) = kc.dual_labels() {
+                if let Some((tap, hold)) = action.dual_labels() {
                     let top = egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.3);
                     ui.painter().text(
                         top,
@@ -412,7 +424,7 @@ impl ViarApp {
                     ui.painter().text(
                         egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.4),
                         egui::Align2::CENTER_CENTER,
-                        &kc.name(),
+                        &action.name(),
                         egui::FontId::proportional(11.0),
                         egui::Color32::WHITE,
                     );
@@ -435,7 +447,7 @@ impl ViarApp {
                 if response.clicked() {
                     to_remove = Some(i);
                 }
-                response.on_hover_text(format!("{} (0x{:04X}) — click to remove", kc.name(), raw));
+                response.on_hover_text(format!("{} — click to remove", action.name()));
             }
         });
 
@@ -454,7 +466,7 @@ impl ViarApp {
 }
 
 /// Render a preview of what a quantum keycap looks like.
-fn render_quantum_keycap_preview(ui: &mut egui::Ui, kc: Keycode) {
+fn render_quantum_keycap_preview(ui: &mut egui::Ui, action: KeyAction) {
     let size = egui::vec2(56.0, 40.0);
     let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
 
@@ -470,7 +482,7 @@ fn render_quantum_keycap_preview(ui: &mut egui::Ui, kc: Keycode) {
         egui::StrokeKind::Outside,
     );
 
-    if let Some((tap, hold)) = kc.dual_labels() {
+    if let Some((tap, hold)) = action.dual_labels() {
         let top_center = egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.35);
         ui.painter().text(
             top_center,
@@ -491,7 +503,7 @@ fn render_quantum_keycap_preview(ui: &mut egui::Ui, kc: Keycode) {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            &kc.name(),
+            &action.name(),
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );

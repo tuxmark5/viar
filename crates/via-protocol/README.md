@@ -75,25 +75,28 @@ let keymap = proto.read_entire_keymap(layers, rows, cols).unwrap();
 ### Writing Keys
 
 ```rust
-use via_protocol::Keycode;
-
-// Set layer 0, row 0, col 0 to KC_A
-proto.set_keycode(0, 0, 0, Keycode(0x0004)).unwrap();
+// Set layer 0, row 0, col 0 to KC_A (raw device keycode as u16)
+proto.set_keycode(0, 0, 0, 0x0004).unwrap();
 ```
 
 Changes take effect on the keyboard immediately. VIA firmware persists them to EEPROM automatically.
 
+Raw `u16` values are the device's wire format. To work with keycodes by
+*meaning*, decode them into a [`KeyAction`] with a [`KeycodeEncoding`] (see
+below); the numeric scheme differs between VIA protocol versions.
+
 ### Keycode Utilities
 
 ```rust
-use via_protocol::{Keycode, all_basic_keycodes, keycode_groups};
+use via_protocol::{KeyAction, encoding_for_protocol, all_basic_keycodes, keycode_groups};
 
-let kc = Keycode(0x0004);
-println!("{}", kc.name());        // "KC_A"
-println!("{}", kc.short_name());  // "A"
-println!("{:?}", kc.category());  // Basic
+// Decode a raw device value into an encoding-independent action.
+let encoding = encoding_for_protocol(proto_version);
+let action: KeyAction = encoding.decode(0x0004);
+println!("{}", action.name());        // "A"
+println!("{:?}", action.category());  // Basic
 
-// All basic HID keycodes
+// All basic HID keycodes, as actions
 let basics = all_basic_keycodes();
 
 // Categorized groups (Letters, Numbers, Modifiers, Layers, etc.)

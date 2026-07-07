@@ -13,11 +13,13 @@ pub mod keycode_groups;
 mod keycode_macros;
 mod keycodes;
 pub mod layout;
+pub mod magic_key;
 pub mod mod_mask;
 mod protocol;
 mod qmk_names;
 pub mod quantum_key;
 pub mod rgb_key;
+pub mod swap_hands_key;
 pub mod tap_dance_key;
 
 pub use basic_key::BasicKey;
@@ -62,13 +64,9 @@ pub use keycode_groups::{
     keycode_groups,
 };
 pub use keycodes::{
-    Keycode,
     KeycodeCategory,
     QuantumKeyType,
-    mod_mask_to_string,
-    mod_tap_prefix,
     quantum_key_types,
-    quantum_keycode_defaults,
 };
 pub use layout::{
     EncoderKey,
@@ -83,8 +81,10 @@ pub use protocol::{
     ViaProtocol,
     VialRgbInfo,
 };
+pub use magic_key::MagicKey;
 pub use quantum_key::QuantumKey;
 pub use rgb_key::RgbKey;
+pub use swap_hands_key::SwapHandsKey;
 pub use tap_dance_key::TapDanceKey;
 
 /// VIA HID usage page used to identify VIA-enabled keyboards.
