@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use eframe::egui;
+use egui::Color32;
 use via_protocol::{
     EncoderKey,
     EncoderPosition,
@@ -34,42 +35,42 @@ use crate::{
 // Shared keycap / picker palette. `from_rgb` is const, so these are constants.
 
 /// Background of a selected keycap or the current keycode in the picker.
-const COL_SELECTED_BG: egui::Color32 = egui::Color32::from_rgb(70, 130, 180);
+const COL_SELECTED_BG: Color32 = Color32::from_rgb(70, 130, 180);
 /// Background of a hovered keycap.
-const COL_HOVER_BG: egui::Color32 = egui::Color32::from_rgb(80, 80, 90);
+const COL_HOVER_BG: Color32 = Color32::from_rgb(80, 80, 90);
 /// Border of a selected / current keycap.
-const COL_SELECTED_BORDER: egui::Color32 = egui::Color32::from_rgb(100, 180, 255);
+const COL_SELECTED_BORDER: Color32 = Color32::from_rgb(100, 180, 255);
 /// Default keycap border.
-const COL_BORDER: egui::Color32 = egui::Color32::from_rgb(60, 60, 65);
+const COL_BORDER: Color32 = Color32::from_rgb(60, 60, 65);
 /// Primary keycap label text.
-const COL_TEXT: egui::Color32 = egui::Color32::from_rgb(220, 220, 230);
+const COL_TEXT: Color32 = Color32::from_rgb(220, 220, 230);
 /// Dimmed text for empty (KC_NO / KC_TRNS) keys.
-const COL_TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(100, 100, 110);
+const COL_TEXT_DIM: Color32 = Color32::from_rgb(100, 100, 110);
 /// Hold/sub label on a split keycap (default state).
-const COL_HOLD_LABEL: egui::Color32 = egui::Color32::from_rgb(140, 140, 160);
+const COL_HOLD_LABEL: Color32 = Color32::from_rgb(140, 140, 160);
 /// Hold/sub label on a split keycap (selected state).
-const COL_HOLD_LABEL_SEL: egui::Color32 = egui::Color32::from_rgb(180, 200, 230);
+const COL_HOLD_LABEL_SEL: Color32 = Color32::from_rgb(180, 200, 230);
 
 /// Keycode name in the picker header.
-const COL_KC_NAME: egui::Color32 = egui::Color32::from_rgb(160, 160, 175);
+const COL_KC_NAME: Color32 = Color32::from_rgb(160, 160, 175);
 /// Keycode category label in the picker header.
-const COL_CATEGORY: egui::Color32 = egui::Color32::from_rgb(120, 120, 135);
+const COL_CATEGORY: Color32 = Color32::from_rgb(120, 120, 135);
 /// "Hex:" field label in the picker.
-const COL_HEX_LABEL: egui::Color32 = egui::Color32::from_rgb(130, 130, 145);
+const COL_HEX_LABEL: Color32 = Color32::from_rgb(130, 130, 145);
 /// Live "→ name" preview next to the hex field.
-const COL_PREVIEW: egui::Color32 = egui::Color32::from_rgb(140, 170, 200);
+const COL_PREVIEW: Color32 = Color32::from_rgb(140, 170, 200);
 
 /// Combo description text in the key tooltip.
-const COL_COMBO_DESC: egui::Color32 = egui::Color32::from_rgb(180, 200, 220);
+const COL_COMBO_DESC: Color32 = Color32::from_rgb(180, 200, 220);
 /// Tap-dance summary text in the key tooltip.
-const COL_TAPDANCE_INFO: egui::Color32 = egui::Color32::from_rgb(200, 180, 140);
+const COL_TAPDANCE_INFO: Color32 = Color32::from_rgb(200, 180, 140);
 
 /// Default background of a "My Quantum" favorite cell.
-const COL_FAV_BG: egui::Color32 = egui::Color32::from_rgb(50, 55, 65);
+const COL_FAV_BG: Color32 = Color32::from_rgb(50, 55, 65);
 /// Default border of a "My Quantum" favorite cell.
-const COL_FAV_BORDER: egui::Color32 = egui::Color32::from_rgb(70, 100, 140);
+const COL_FAV_BORDER: Color32 = Color32::from_rgb(70, 100, 140);
 /// Hold/sub label on a split favorite cell.
-const COL_FAV_HOLD_LABEL: egui::Color32 = egui::Color32::from_rgb(150, 180, 220);
+const COL_FAV_HOLD_LABEL: Color32 = Color32::from_rgb(150, 180, 220);
 
 impl ViarApp {
     pub fn render_keymap_tab(&mut self, ui: &mut egui::Ui) {
@@ -594,7 +595,7 @@ fn render_quantum_favorites(
                             egui::Align2::CENTER_CENTER,
                             &tap,
                             egui::FontId::proportional(12.0),
-                            egui::Color32::WHITE,
+                            Color32::WHITE,
                         );
                         let bot = egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.72);
                         ui.painter().text(
@@ -661,7 +662,7 @@ fn render_keycode_grid(
                         COL_BORDER
                     };
                     let text_col = if is_current {
-                        egui::Color32::WHITE
+                        Color32::WHITE
                     } else if action.is_empty() {
                         COL_TEXT_DIM
                     } else {
@@ -708,12 +709,12 @@ fn render_keycode_grid(
 
 /// A combo that a keycode participates in, with its assigned color.
 struct ComboInfo {
-    color:       egui::Color32,
+    color:       Color32,
     description: String,
 }
 
 /// Assign a distinct, muted color to a combo based on its index.
-fn combo_color(index: usize, total: usize) -> egui::Color32 {
+fn combo_color(index: usize, total: usize) -> Color32 {
     let hue = if total <= 1 {
         0.35 // green
     } else {
@@ -734,7 +735,7 @@ fn combo_color(index: usize, total: usize) -> egui::Color32 {
         _ => (c, 0.0, x),
     };
     let m = l - c / 2.0;
-    egui::Color32::from_rgb(
+    Color32::from_rgb(
         ((r1 + m) * 255.0) as u8,
         ((g1 + m) * 255.0) as u8,
         ((b1 + m) * 255.0) as u8,
@@ -846,7 +847,7 @@ fn render_layer_bar(
     ui: &mut egui::Ui,
     data: &mut KeymapData,
     theme: &Theme,
-    flash: Option<(usize, f32, egui::Color32)>,
+    flash: Option<(usize, f32, Color32)>,
 ) -> (Option<usize>, Option<usize>) {
     let bar = ui.horizontal(|ui| {
         let mut copy_layer = None;
@@ -933,7 +934,7 @@ struct KeymapRender<'a> {
     /// its hover tooltip; all lookups and logic work on `KeyAction`s directly.
     encoding:  KeycodeEncodingRef,
     /// Active copy/paste pulse: (flashing slot, 0..1 progress, color).
-    flash:     Option<(EditTarget, f32, egui::Color32)>,
+    flash:     Option<(EditTarget, f32, Color32)>,
 }
 
 /// Interaction outcome of rendering keys / encoders for a frame.
@@ -998,7 +999,7 @@ fn draw_flash_ring(
     rect: egui::Rect,
     rounding: egui::CornerRadius,
     progress: f32,
-    color: egui::Color32,
+    color: Color32,
 ) {
     let flash_rect = rect.expand(progress * 4.0);
     painter.rect_stroke(
@@ -1105,7 +1106,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     let label = action_label(action, ctx.aliases);
 
     let text_color = if is_selected {
-        egui::Color32::WHITE
+        Color32::WHITE
     } else if action.is_empty() {
         COL_TEXT_DIM
     } else {
@@ -1186,7 +1187,16 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
     draw_slot_flash(painter, ctx, rect, rounding, EditTarget::Key(key_idx));
 
     if is_hovered {
-        render_key_tooltip(ui, ctx, key_idx, key_pos.row, key_pos.col, action, raw_kc, &label);
+        render_key_tooltip(
+            ui,
+            ctx,
+            key_idx,
+            key_pos.row,
+            key_pos.col,
+            action,
+            raw_kc,
+            &label,
+        );
     }
 
     let mut result = slot_click(ui, is_hovered, EditTarget::Key(key_idx));
@@ -1533,7 +1543,7 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
             slot.glyph,
             egui::FontId::proportional((slot.rect.height() * 0.34).min(14.0)),
             if is_selected {
-                egui::Color32::WHITE
+                Color32::WHITE
             } else {
                 COL_HOLD_LABEL
             },
@@ -1541,7 +1551,7 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
     }
 
     let text_color = if is_selected {
-        egui::Color32::WHITE
+        Color32::WHITE
     } else if action.is_empty() {
         COL_TEXT_DIM
     } else {
