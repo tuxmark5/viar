@@ -31,4 +31,3 @@ keycode_block! {
         0x0F => "MG_TOGN", MG_TOGN, "Toggle NKRO",
     }
 }
-

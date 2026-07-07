@@ -75,13 +75,13 @@ pub use layout::{
     KeyboardLayout,
     parse_vial_definition,
 };
+pub use magic_key::MagicKey;
 pub use mod_mask::ModMask;
 pub use protocol::{
     LightingValues,
     ViaProtocol,
     VialRgbInfo,
 };
-pub use magic_key::MagicKey;
 pub use quantum_key::QuantumKey;
 pub use rgb_key::RgbKey;
 pub use swap_hands_key::SwapHandsKey;

@@ -22,7 +22,13 @@ use crate::{
         ViarApp,
         action_label,
     },
-    ui::keycode_builder::render_keycode_builder,
+    ui::{
+        keycode_builder::render_keycode_builder,
+        layer_picker::{
+            is_layers_group,
+            render_layer_picker,
+        },
+    },
     util::{
         CategoryStyle,
         themed_tab,
@@ -342,6 +348,15 @@ impl ViarApp {
                         .inner
                 } else if has_quantum_favs && group_idx == quantum_tab_idx {
                     render_quantum_favorites(ui, &self.quantum_favorites, current)
+                } else if self
+                    .picker_groups
+                    .get(group_idx)
+                    .is_some_and(is_layers_group)
+                {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| render_layer_picker(ui, current))
+                        .inner
                 } else {
                     render_keycode_grid(ui, self.picker_groups.get(group_idx), current, aliases_ref)
                 };

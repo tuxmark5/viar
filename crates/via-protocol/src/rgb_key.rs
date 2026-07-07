@@ -72,4 +72,3 @@ keycode_block! {
         0x4C => "RM_SPDD", QK_RGB_MATRIX_SPEED_DOWN,
     }
 }
-

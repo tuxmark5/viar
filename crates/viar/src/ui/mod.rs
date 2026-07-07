@@ -6,6 +6,7 @@ pub mod keycode_builder;
 pub mod keymap_edit;
 pub mod keymap_io;
 pub mod keymap_tab;
+pub mod layer_picker;
 pub mod lighting_tab;
 pub mod menu;
 pub mod pointing_tab;

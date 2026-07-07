@@ -183,7 +183,9 @@ impl ViarApp {
                                         if resp.lost_focus() {
                                             if let Some(dynamic) = self.dynamic_data.as_mut() {
                                                 let trimmed = name.trim().to_string();
-                                                if trimmed.is_empty() || trimmed == alias_key.default_name() {
+                                                if trimmed.is_empty()
+                                                    || trimmed == alias_key.default_name()
+                                                {
                                                     dynamic.aliases.remove(&alias_key);
                                                 } else {
                                                     dynamic.aliases.insert(alias_key, trimmed);
@@ -219,7 +221,8 @@ impl ViarApp {
                                             );
                                         } else {
                                             let trig = encoding.decode(entry.trigger).to_string();
-                                            let repl = encoding.decode(entry.replacement).to_string();
+                                            let repl =
+                                                encoding.decode(entry.replacement).to_string();
                                             let status = if !is_enabled { " [OFF]" } else { "" };
                                             ui.label(
                                                 egui::RichText::new(format!(
@@ -335,8 +338,12 @@ impl ViarApp {
                     editing_idx,
                     KeyOverrideField::Replacement,
                 ));
-            if keycode_chip(ui, "Replacement", encoding.decode(entry.replacement), is_active)
-                && let Some(dynamic) = self.dynamic_data.as_mut()
+            if keycode_chip(
+                ui,
+                "Replacement",
+                encoding.decode(entry.replacement),
+                is_active,
+            ) && let Some(dynamic) = self.dynamic_data.as_mut()
             {
                 dynamic.active_field = Some(ActiveKeycodeField::KeyOverride(
                     editing_idx,

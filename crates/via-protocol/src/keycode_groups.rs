@@ -155,6 +155,7 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
                     .chain(layers(KeyAction::DefLayer))
                     .chain(layers(KeyAction::OneShotLayer))
                     .chain(layers(KeyAction::TapToggleLayer))
+                    .chain(layers(KeyAction::PersistentDefLayer))
                     .collect();
                 // One-shot modifiers: L/R Ctrl/Shift/Alt/GUI and common combos.
                 use ModMask as M;
@@ -177,8 +178,6 @@ pub fn keycode_groups() -> Vec<KeycodeGroup> {
                     ]
                     .map(KeyAction::OneShotMod),
                 );
-                // PDF(0)..PDF(3) — persistent default layer.
-                v.extend((0..4u8).map(|i| KeyAction::PersistentDefLayer(LayerId(i))));
                 v
             },
         },

@@ -46,15 +46,24 @@ pub struct AliasKey {
 
 impl AliasKey {
     pub fn tap_dance(index: usize) -> Self {
-        Self { kind: DynamicKind::TapDance, index }
+        Self {
+            kind: DynamicKind::TapDance,
+            index,
+        }
     }
 
     pub fn combo(index: usize) -> Self {
-        Self { kind: DynamicKind::Combo, index }
+        Self {
+            kind: DynamicKind::Combo,
+            index,
+        }
     }
 
     pub fn key_override(index: usize) -> Self {
-        Self { kind: DynamicKind::KeyOverride, index }
+        Self {
+            kind: DynamicKind::KeyOverride,
+            index,
+        }
     }
 
     /// The default (un-aliased) display name, e.g. `TD(0)`, `C3`, `KO1`.

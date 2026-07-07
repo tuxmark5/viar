@@ -127,7 +127,9 @@ impl ViarApp {
                                         if resp.lost_focus() {
                                             if let Some(dynamic) = self.dynamic_data.as_mut() {
                                                 let trimmed = name.trim().to_string();
-                                                if trimmed.is_empty() || trimmed == alias_key.default_name() {
+                                                if trimmed.is_empty()
+                                                    || trimmed == alias_key.default_name()
+                                                {
                                                     dynamic.aliases.remove(&alias_key);
                                                 } else {
                                                     dynamic.aliases.insert(alias_key, trimmed);

@@ -207,4 +207,3 @@ basic_keys! {
     0xE6 => "RAlt", KC_RIGHT_ALT, "Right Alt / AltGr",
     0xE7 => "RGui", KC_RIGHT_GUI, "Right GUI / Super / Command",
 }
-

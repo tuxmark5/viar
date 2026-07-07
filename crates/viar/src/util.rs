@@ -14,6 +14,10 @@ use crate::{
         AliasKey,
         action_label,
     },
+    ui::layer_picker::{
+        is_layers_group,
+        render_layer_picker,
+    },
 };
 
 /// Render a tab-style selectable label with proper text contrast.
@@ -292,6 +296,14 @@ pub fn shared_keycode_picker(
     egui::ScrollArea::vertical()
         .max_height(180.0)
         .show(ui, |ui| {
+            // The Layers group is a two-step kind + destination-layer picker
+            // rather than a flat grid.
+            if groups.get(*selected_group).is_some_and(is_layers_group) {
+                if let Some(action) = render_layer_picker(ui, current) {
+                    result.selected = Some(action);
+                }
+                return;
+            }
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                 if let Some(group) = groups.get(*selected_group) {

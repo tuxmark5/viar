@@ -94,4 +94,3 @@ keycode_block! {
         0x7B => "QK_LLCK", QK_LAYER_LOCK,
     }
 }
-

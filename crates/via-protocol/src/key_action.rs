@@ -204,13 +204,22 @@ mod tests {
 
     #[test]
     fn basic_action_categories() {
-        assert_eq!(KeyAction::Basic(BasicKey(0x00)).category(), KeycodeCategory::None);
+        assert_eq!(
+            KeyAction::Basic(BasicKey(0x00)).category(),
+            KeycodeCategory::None
+        );
         assert_eq!(
             KeyAction::Basic(BasicKey(0x01)).category(),
             KeycodeCategory::Transparent
         );
-        assert_eq!(KeyAction::Basic(BasicKey(0x04)).category(), KeycodeCategory::Basic);
-        assert_eq!(KeyAction::Basic(BasicKey(0xD1)).category(), KeycodeCategory::Mouse);
+        assert_eq!(
+            KeyAction::Basic(BasicKey(0x04)).category(),
+            KeycodeCategory::Basic
+        );
+        assert_eq!(
+            KeyAction::Basic(BasicKey(0xD1)).category(),
+            KeycodeCategory::Mouse
+        );
     }
 
     #[test]
@@ -220,7 +229,10 @@ mod tests {
         assert_eq!(sh.to_string(), "SH_TG");
         assert_eq!(sh.category(), KeycodeCategory::SwapHands);
         // Parametric SH(kc) form.
-        assert_eq!(KeyAction::SwapHands(SwapHandsKey(0x04)).to_string(), "SH(A)");
+        assert_eq!(
+            KeyAction::SwapHands(SwapHandsKey(0x04)).to_string(),
+            "SH(A)"
+        );
 
         // Magic (0x7000–0x70FF).
         let magic = KeyAction::Magic(MagicKey::MG_GESC);

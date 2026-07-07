@@ -367,7 +367,10 @@ mod tests {
         let e = &NewEncoding;
         assert_eq!(e.decode(0x7005), KeyAction::Magic(MagicKey::MG_GESC));
         assert_eq!(e.encode(KeyAction::Magic(MagicKey::MG_GESC)), 0x7005);
-        assert!(matches!(OldEncoding.decode(0x7005), KeyAction::ModTap { .. }));
+        assert!(matches!(
+            OldEncoding.decode(0x7005),
+            KeyAction::ModTap { .. }
+        ));
     }
 
     #[test]
