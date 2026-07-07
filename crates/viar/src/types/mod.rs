@@ -15,10 +15,12 @@ pub use common::{
 };
 pub use dynamic::{
     ActiveKeycodeField,
+    AliasKey,
     ComboField,
     DynamicEntryData,
     KeyOverrideField,
     TapDanceField,
+    action_label,
 };
 pub use keymap::{
     EditChange,

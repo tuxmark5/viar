@@ -594,10 +594,10 @@ pub struct ViarConfig {
     /// Name of the active theme (built-in or custom)
     #[serde(default = "default_theme_name")]
     pub theme:   String,
-    /// User-defined aliases for dynamic entries (tap dances, combos, key overrides).
-    /// Keys are like "td:0", "combo:3", "ko:1".
+    /// User-defined names for dynamic entries (tap dances, combos, key overrides),
+    /// keyed by the slot they rename (persisted as `"td:0"` / `"combo:3"` strings).
     #[serde(default)]
-    pub aliases: HashMap<String, String>,
+    pub aliases: HashMap<crate::types::AliasKey, String>,
 }
 
 fn default_theme_name() -> String {

@@ -11,6 +11,7 @@ use via_protocol::{
 use crate::{
     types::{
         ActiveKeycodeField,
+        AliasKey,
         ComboField,
         StatusMessage,
         ViarApp,
@@ -79,8 +80,8 @@ impl ViarApp {
                     for (idx, entry) in &entries {
                         let is_selected = editing == Some(*idx);
                         let is_empty = entry.is_empty();
-                        let alias_key = format!("combo:{idx}");
-                        let is_renaming = editing_alias.as_deref() == Some(&alias_key);
+                        let alias_key = AliasKey::combo(*idx);
+                        let is_renaming = editing_alias == Some(alias_key);
 
                         let bg = if is_selected {
                             egui::Color32::from_rgb(45, 55, 75)
@@ -126,13 +127,10 @@ impl ViarApp {
                                         if resp.lost_focus() {
                                             if let Some(dynamic) = self.dynamic_data.as_mut() {
                                                 let trimmed = name.trim().to_string();
-                                                let default = format!("C{idx}");
-                                                if trimmed.is_empty() || trimmed == default {
+                                                if trimmed.is_empty() || trimmed == alias_key.default_name() {
                                                     dynamic.aliases.remove(&alias_key);
                                                 } else {
-                                                    dynamic
-                                                        .aliases
-                                                        .insert(alias_key.clone(), trimmed);
+                                                    dynamic.aliases.insert(alias_key, trimmed);
                                                 }
                                                 dynamic.editing_alias = None;
                                                 self.config.aliases = dynamic.aliases.clone();
@@ -197,7 +195,7 @@ impl ViarApp {
                         if resp.double_clicked()
                             && let Some(dynamic) = self.dynamic_data.as_mut()
                         {
-                            dynamic.editing_alias = Some(alias_key.clone());
+                            dynamic.editing_alias = Some(alias_key);
                             let text_id = egui::Id::new(("combo_alias_edit", *idx));
                             let current = combo_names[*idx].clone();
                             ui.memory_mut(|mem| mem.data.insert_temp(text_id, current));

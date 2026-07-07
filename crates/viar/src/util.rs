@@ -8,19 +8,13 @@ use via_protocol::{
     KeycodeGroup,
 };
 
-use crate::theme::Theme;
-
-/// Resolve a decoded action's name using aliases if available (for keycaps and
-/// the picker grid). Tap-dance keys carry their index for the alias lookup.
-pub fn action_name(action: KeyAction, aliases: Option<&HashMap<String, String>>) -> String {
-    if let (Some(aliases), KeyAction::TapDance(td)) = (aliases, action)
-        && let Some(alias) = aliases.get(&format!("td:{}", td.0))
-        && !alias.is_empty()
-    {
-        return alias.clone();
-    }
-    action.to_string()
-}
+use crate::{
+    theme::Theme,
+    types::{
+        AliasKey,
+        action_label,
+    },
+};
 
 /// Render a tab-style selectable label with proper text contrast.
 /// When selected, uses `text_on_accent` so text is legible against the accent background.
@@ -220,7 +214,7 @@ pub fn shared_keycode_picker(
     groups: &[KeycodeGroup],
     active_field_label: &str,
     theme: &Theme,
-    aliases: Option<&HashMap<String, String>>,
+    aliases: Option<&HashMap<AliasKey, String>>,
     encoding: KeycodeEncodingRef,
 ) -> PickerResult {
     let mut result = PickerResult {
@@ -302,7 +296,7 @@ pub fn shared_keycode_picker(
                 ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                 if let Some(group) = groups.get(*selected_group) {
                     for &action in &group.codes {
-                        let kc_name = action_name(action, aliases);
+                        let kc_name = action_label(action, aliases);
                         let is_current = action == current;
                         let size = egui::vec2(38.0, 22.0);
                         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());

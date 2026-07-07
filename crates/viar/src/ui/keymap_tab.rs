@@ -13,16 +13,17 @@ use via_protocol::{
 use crate::{
     theme::Theme,
     types::{
+        AliasKey,
         DynamicEntryData,
         EditTarget,
         FlashKind,
         KeymapData,
         ViarApp,
+        action_label,
     },
     ui::keycode_builder::render_keycode_builder,
     util::{
         CategoryStyle,
-        action_name,
         themed_tab,
     },
 };
@@ -273,7 +274,7 @@ impl ViarApp {
         target: EditTarget,
         anchor: egui::Rect,
         layer_idx: usize,
-        aliases_ref: Option<&HashMap<String, String>>,
+        aliases_ref: Option<&HashMap<AliasKey, String>>,
     ) {
         // Snapshot the slot's current keycode / header, then release the
         // keymap_data borrow so the picker body can freely touch other self fields.
@@ -289,7 +290,7 @@ impl ViarApp {
                 action,
                 device_raw,
                 target_header(layer_idx, target, data),
-                action_name(action, aliases_ref),
+                action_label(action, aliases_ref),
                 format!("{:?}", action.category()),
             )
         };
@@ -629,7 +630,7 @@ fn render_keycode_grid(
     ui: &mut egui::Ui,
     group: Option<&KeycodeGroup>,
     current: KeyAction,
-    aliases_ref: Option<&HashMap<String, String>>,
+    aliases_ref: Option<&HashMap<AliasKey, String>>,
 ) -> Option<KeyAction> {
     let mut picked = None;
     egui::ScrollArea::vertical()
@@ -641,7 +642,7 @@ fn render_keycode_grid(
                     return;
                 };
                 for &action in &group.codes {
-                    let name = action_name(action, aliases_ref);
+                    let name = action_label(action, aliases_ref);
                     let is_current = action == current;
                     let size = egui::vec2(44.0, 28.0);
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -927,7 +928,7 @@ struct KeymapRender<'a> {
     gap:       f32,
     combo_map: &'a HashMap<KeyAction, Vec<ComboInfo>>,
     td:        &'a TdLabels,
-    aliases:   Option<&'a HashMap<String, String>>,
+    aliases:   Option<&'a HashMap<AliasKey, String>>,
     /// Device keycode encoding — only used to show a keycap's raw device value in
     /// its hover tooltip; all lookups and logic work on `KeyAction`s directly.
     encoding:  KeycodeEncodingRef,
@@ -1101,7 +1102,7 @@ fn render_key(ui: &egui::Ui, ctx: &KeymapRender, key_idx: usize) -> RenderResult
         egui::StrokeKind::Outside,
     );
 
-    let label = action_name(action, ctx.aliases);
+    let label = action_label(action, ctx.aliases);
 
     let text_color = if is_selected {
         egui::Color32::WHITE
@@ -1546,7 +1547,7 @@ fn draw_encoder_slot(ui: &egui::Ui, ctx: &KeymapRender, slot: &EncoderSlot) -> R
     } else {
         COL_TEXT
     };
-    let label = action_name(action, ctx.aliases);
+    let label = action_label(action, ctx.aliases);
     let font_size = (slot.rect.height() * 0.3).clamp(7.0, 14.0);
     painter.text(
         slot.rect.center(),
